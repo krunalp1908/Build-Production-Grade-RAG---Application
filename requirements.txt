@@ -1,7 +1,7 @@
 # ==============================================================================
 # ENTERPRISE AGENTIC RAG - REQUIREMENTS (Local, No GCP)
 # ==============================================================================
-# Stage 2 — Basic RAG. Grows one stage at a time as the course progresses.
+# Stage 3 — Reranking + Memory. Grows one stage at a time as the course progresses.
 
 # --- CORE API & WEB FRAMEWORK ---
 fastapi                     # High-performance web framework for the API
@@ -14,10 +14,10 @@ numpy                       # Numerical processing
 # --- GEMINI EMBEDDINGS ---
 google-generativeai         # Gemini API — embeddings (text-embedding-004 / gemini-embedding-001)
 langchain-google-genai      # LangChain integration for Gemini models
-sentence-transformers       # Local fallback embedding model if the Gemini API is unavailable
 
 # --- VECTOR DB & RETRIEVAL ---
 qdrant-client               # Vector Database for semantic search
+flashrank                   # Ultra-fast local cross-encoder for semantic reranking
 
 # --- LANGCHAIN & AGENTIC ORCHESTRATION ---
 langchain                   # Core LLM orchestration
@@ -37,3 +37,6 @@ pdfplumber                  # Fallback PDF parser for scanned/complex layouts
 langsmith                   # Specialized tracing for LangChain/LangGraph
 logfire[fastapi,requests]   # Pydantic Logfire — FastAPI + requests instrumentation
 loguru                      # Enhanced logging for Python
+
+# --- EMBEDDINGS (SENTENCE TRANSFORMERS) ---
+sentence-transformers       # Used by FlashRank reranker internally
