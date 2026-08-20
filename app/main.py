@@ -5,7 +5,6 @@
 import logfire
 import os
 from dotenv import load_dotenv
-import uuid
 
 load_dotenv()
 logfire.configure(token=os.getenv("LOGFIRE_TOKEN"))
@@ -50,7 +49,7 @@ def query(request: QueryRequest):
     Executes the LangGraph RAG flow with memory using a POST request.
     """
     q = request.q
-    thread_id = str(uuid.uuid4())
+    thread_id = request.thread_id
 
     initial_state = {
         "messages": [{"role": "user", "content": q}],
