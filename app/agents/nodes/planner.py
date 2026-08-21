@@ -1,9 +1,11 @@
-from app.agents.state import AgentState
-from app.gateway import get_langchain_llm
 import logfire
 
-# Portkey-backed LLM: fallback + cache + retry — same .invoke() interface as ChatGroq
+from app.agents.state import AgentState
+from app.gateway import get_langchain_llm
+
+# Portkey-backed LLM: fallback + cache + retry — same .invoke() interface as ChatOpenAI
 llm = get_langchain_llm(feature="planner")
+
 
 def planner_node(state: AgentState):
     """
@@ -42,11 +44,11 @@ def planner_node(state: AgentState):
         return {
             "current_query": "CONVERSATIONAL",
             "status": "Handling conversationally (using memory)...",
-            "plan": ["Intent: Conversational/Memory", "Retrieval: Skipped"]
+            "plan": ["Intent: Conversational/Memory", "Retrieval: Skipped"],
         }
 
     return {
         "current_query": decision,
         "status": f"Technical research needed. Searching for: {decision}",
-        "plan": ["Intent: Technical", f"Search Term: {decision}"]
+        "plan": ["Intent: Technical", f"Search Term: {decision}"],
     }
