@@ -18,6 +18,25 @@ def planner_node(state: AgentState):
         history += f"{role}: {msg['content']}\n"
 
     user_message = state["messages"][-1]["content"] if state["messages"] else ""
+    user_message_lower = user_message.lower()
+    history_lower = history.lower()
+
+    memory_markers = ["my name is", "i am ", "i'm ", "call me "]
+    memory_followup = (
+        "what is my name" in user_message_lower
+        or "who am i" in user_message_lower
+        or "what did i tell you" in user_message_lower
+        or "what did i say" in user_message_lower
+    )
+    personal_intro = any(marker in user_message_lower for marker in memory_markers)
+    has_memory = any(marker in history_lower for marker in memory_markers)
+
+    if personal_intro or (memory_followup and has_memory):
+        return {
+            "current_query": "CONVERSATIONAL",
+            "status": "Handling conversational memory question...",
+            "plan": ["Intent: Conversational/Memory", "Retrieval: Skipped"],
+        }
 
     prompt = f"""
     You are an intelligent Assistant Planner.

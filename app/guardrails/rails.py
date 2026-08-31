@@ -12,6 +12,9 @@ from app.guardrails.colang_rules import (
     GREETING_KEYWORDS,
     GREETING_RESPONSE,
     KNOWN_RAIL_RESPONSES,
+    MEMORY_NAME_PATTERNS,
+    MEMORY_QUESTION_PATTERNS,
+    OFF_TOPIC_PATTERNS,
     OFF_TOPIC_RESPONSE,
     RAIL_INDICATORS,
     TECHNICAL_KEYWORDS,
@@ -37,44 +40,53 @@ def initialize_rails() -> None:
     logfire.info("🛡️ NeMo Guardrails initialised (gpt-4o-mini).")
 
 
-def guard(message: str) -> tuple[bool, str | None]:
+def guard(message: str, history: list[str] | None = None) -> tuple[bool, str | None]:
     """
-    Determine whether a request is a valid RAG question or a non-RAG interaction.
-
-    Allowed paths:
-      - technical knowledge-base questions
-      - greeting / capability / farewell dialogs
-
-    Blocked paths:
-      - unrelated topics, empty input, or unclassified prompts
+    Simple guardrail policy:
+      - allow greetings / capabilities / farewells
+      - allow technical knowledge-base questions
+      - block known off-topic prompts
+      - use session history so the last question is remembered
     """
     text = (message or "").strip()
     if not text:
         logfire.warning("🛡️ Empty guardrail input — blocking request.")
         return True, OFF_TOPIC_RESPONSE
 
+    history_text = " ".join((h or "") for h in (history or []) if h)
+    combined = f"{history_text} {text}".lower()
     normalized = text.lower()
 
     if any(keyword in normalized for keyword in GREETING_KEYWORDS):
-        logfire.info("🛡️ Greeting detected; returning dialog response.")
         return True, GREETING_RESPONSE
 
     if any(keyword in normalized for keyword in CAPABILITY_KEYWORDS):
-        logfire.info("🛡️ Capability question detected; returning dialog response.")
         return True, CAPABILITIES_RESPONSE
 
     if any(keyword in normalized for keyword in FAREWELL_KEYWORDS):
-        logfire.info("🛡️ Farewell detected; returning dialog response.")
         return True, FAREWELL_RESPONSE
 
-    if any(keyword in normalized for keyword in TECHNICAL_KEYWORDS):
+    if any(memory_pattern in normalized for memory_pattern in MEMORY_NAME_PATTERNS):
+        logfire.info("✅ Personal memory statement detected; allowing conversational memory.")
+        return False, None
+
+    if any(pattern in normalized for pattern in OFF_TOPIC_PATTERNS):
+        logfire.info("🛡️ Off-topic question detected; firing guardrail.")
+        return True, OFF_TOPIC_RESPONSE
+
+    if any(question in combined for question in MEMORY_QUESTION_PATTERNS):
+        if any(memory_pattern in history_text for memory_pattern in MEMORY_NAME_PATTERNS):
+            logfire.info("✅ Memory-based conversational question detected; allowing conversation.")
+            return False, None
+
+    if any(keyword in combined for keyword in TECHNICAL_KEYWORDS):
         logfire.info("✅ Technical knowledge-base question detected; allowing RAG.")
         return False, None
 
     if _rails is not None:
         with logfire.span("🛡️ Guardrails Check"):
             try:
-                result = _rails.generate(messages=[{"role": "user", "content": message}])
+                result = _rails.generate(messages=[{"role": "user", "content": text}])
             except Exception:
                 logfire.exception("🛡️ Guardrails evaluation failed — blocking request.")
                 return True, OFF_TOPIC_RESPONSE
@@ -87,7 +99,7 @@ def guard(message: str) -> tuple[bool, str | None]:
 
             fired = any(indicator.lower() in content.lower() for indicator in RAIL_INDICATORS)
             if fired:
-                logfire.info(f"🛡️ Guardrails fired | query='{message[:80]}'")
+                logfire.info(f"🛡️ Guardrails fired | query='{text[:80]}'")
                 return True, next(
                     (
                         known_response
@@ -97,5 +109,5 @@ def guard(message: str) -> tuple[bool, str | None]:
                     OFF_TOPIC_RESPONSE,
                 )
 
-    logfire.warning("🛡️ Unclassified or off-topic request; blocking to the technical refusal.")
+    logfire.warning("🛡️ Unclassified request; blocking with technical refusal.")
     return True, OFF_TOPIC_RESPONSE

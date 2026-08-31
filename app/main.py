@@ -223,8 +223,20 @@ def query(
 
     start = time.perf_counter()
     with logfire.span("🔍 /query", request_id=request_id, thread_id=thread_id):
-        # Gate: run guardrails synchronously so blocked requests never run the graph.
-        rail_fired, rail_response = guard(q)
+        # Include the current session history so the guardrail remembers prior questions.
+        session_history = []
+        try:
+            state = app.state.rag_agent.get_state(config={"configurable": {"thread_id": thread_id}})
+            if state and state.values:
+                session_history = [
+                    msg.get("content", "")
+                    for msg in state.values.get("messages", [])
+                    if isinstance(msg, dict) and msg.get("content")
+                ]
+        except Exception:
+            session_history = []
+
+        rail_fired, rail_response = guard(q, history=session_history)
         if rail_fired:
             GUARDRAILS_BLOCKS_TOTAL.labels(blocked="true").inc()
             RAG_REQUESTS_TOTAL.labels(status="blocked").inc()
