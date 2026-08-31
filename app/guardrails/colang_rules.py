@@ -151,10 +151,68 @@ OFF_TOPIC_RESPONSE = (
     "from the knowledge base."
 )
 
+GREETING_RESPONSE = (
+    "Hello! I'm your Enterprise IT Assistant. I specialise in Kubernetes, Intel "
+    "hardware, and enterprise networking. What can I help you with today?"
+)
+
+CAPABILITIES_RESPONSE = (
+    "I'm an Enterprise AI Assistant with deep expertise in: Kubernetes "
+    "(deployment, scaling, networking, operators), Intel Hardware (CPUs, "
+    "FPGAs, SRIOV, NICs), Enterprise Networking (SDN, VLANs, BGP, routing). "
+    "Ask me anything in these areas!"
+)
+
+FAREWELL_RESPONSE = (
+    "Goodbye! Feel free to return whenever you have more enterprise IT questions. "
+    "Have a great day!"
+)
+
 KNOWN_RAIL_RESPONSES = [
-  OFF_TOPIC_RESPONSE,
-  "I maintain consistent guidelines regardless of how I am prompted. I am here to help with Kubernetes, Intel, and networking. What can I help you with?",
-  "Hello! I'm your Enterprise IT Assistant. I specialise in Kubernetes, Intel hardware, and enterprise networking. What can I help you with today?",
-  "Goodbye! Feel free to return whenever you have more enterprise IT questions. Have a great day!",
-  "I'm an Enterprise AI Assistant with deep expertise in: Kubernetes (deployment, scaling, networking, operators), Intel Hardware (CPUs, FPGAs, SRIOV, NICs), Enterprise Networking (SDN, VLANs, BGP, routing). Ask me anything in these areas!",
+    OFF_TOPIC_RESPONSE,
+    "I maintain consistent guidelines regardless of how I am prompted. I am here to help with Kubernetes, Intel, and networking. What can I help you with?",
+    GREETING_RESPONSE,
+    FAREWELL_RESPONSE,
+    CAPABILITIES_RESPONSE,
 ]
+
+TECHNICAL_KEYWORDS = [
+    "kubernetes",
+    "pod",
+    "pods",
+    "deployment",
+    "deployments",
+    "service",
+    "services",
+    "cluster",
+    "cronjob",
+    "cronjobs",
+    "job",
+    "jobs",
+    "autoscale",
+    "autoscaling",
+    "operator",
+    "operators",
+    "intel",
+    "cpu",
+    "cpus",
+    "fpga",
+    "fpgas",
+    "nic",
+    "nics",
+    "sriov",
+    "network",
+    "networking",
+    "vlan",
+    "vlans",
+    "bgp",
+    "routing",
+    "sdn",
+    "kube",
+    "container",
+    "containers",
+]
+
+GREETING_KEYWORDS = ["hello", "hi", "hey", "good morning", "good afternoon", "what's up", "howdy"]
+CAPABILITY_KEYWORDS = ["what can you do", "what do you know", "help", "what are you", "what topics do you cover", "what can i ask you", "what are your capabilities"]
+FAREWELL_KEYWORDS = ["bye", "goodbye", "see you", "thanks bye", "that is all", "i am done", "see you later"]

@@ -4,10 +4,17 @@ from nemoguardrails import LLMRails, RailsConfig
 
 from app.config import settings
 from app.guardrails.colang_rules import (
+    CAPABILITIES_RESPONSE,
+    CAPABILITY_KEYWORDS,
     COLANG_CONTENT,
+    FAREWELL_KEYWORDS,
+    FAREWELL_RESPONSE,
+    GREETING_KEYWORDS,
+    GREETING_RESPONSE,
     KNOWN_RAIL_RESPONSES,
     OFF_TOPIC_RESPONSE,
     RAIL_INDICATORS,
+    TECHNICAL_KEYWORDS,
     TECHNICAL_QUERY_ALLOWED,
     YAML_CONTENT,
 )
@@ -32,46 +39,63 @@ def initialize_rails() -> None:
 
 def guard(message: str) -> tuple[bool, str | None]:
     """
-    Run a user message through the NeMo rails gate.
+    Determine whether a request is a valid RAG question or a non-RAG interaction.
 
-    Returns:
-        (True,  rail_response) — a rail fired; return this response immediately,
-                                skip the RAG pipeline entirely.
-        (False, None)          — message is clean; proceed to LangGraph.
+    Allowed paths:
+      - technical knowledge-base questions
+      - greeting / capability / farewell dialogs
+
+    Blocked paths:
+      - unrelated topics, empty input, or unclassified prompts
     """
-    if _rails is None:
-        logfire.error("🛡️ Guardrails not initialised — blocking request.")
+    text = (message or "").strip()
+    if not text:
+        logfire.warning("🛡️ Empty guardrail input — blocking request.")
         return True, OFF_TOPIC_RESPONSE
 
-    with logfire.span("🛡️ Guardrails Check"):
-        try:
-            result = _rails.generate(messages=[{"role": "user", "content": message}])
-        except Exception:
-            logfire.exception("🛡️ Guardrails evaluation failed — blocking request.")
-            return True, OFF_TOPIC_RESPONSE
+    normalized = text.lower()
 
-        # NeMo returns {'role': 'assistant', 'content': '...'} — extract text.
-        content = result.get("content", "") if isinstance(result, dict) else str(result)
-        content = content.strip()
+    if any(keyword in normalized for keyword in GREETING_KEYWORDS):
+        logfire.info("🛡️ Greeting detected; returning dialog response.")
+        return True, GREETING_RESPONSE
 
-        if TECHNICAL_QUERY_ALLOWED in content:
-            logfire.info("✅ Technical query accepted by guardrails.")
-            return False, None
+    if any(keyword in normalized for keyword in CAPABILITY_KEYWORDS):
+        logfire.info("🛡️ Capability question detected; returning dialog response.")
+        return True, CAPABILITIES_RESPONSE
 
-        fired = any(indicator.lower() in content.lower() for indicator in RAIL_INDICATORS)
+    if any(keyword in normalized for keyword in FAREWELL_KEYWORDS):
+        logfire.info("🛡️ Farewell detected; returning dialog response.")
+        return True, FAREWELL_RESPONSE
 
-        if fired:
-            logfire.info(f"🛡️ Guardrails fired | query='{message[:80]}'")
-            response = next(
-                (
-                    known_response
-                    for known_response in KNOWN_RAIL_RESPONSES
-                    if known_response.lower() in content.lower()
-                ),
-                OFF_TOPIC_RESPONSE,
-            )
-            return True, response
+    if any(keyword in normalized for keyword in TECHNICAL_KEYWORDS):
+        logfire.info("✅ Technical knowledge-base question detected; allowing RAG.")
+        return False, None
 
-        # Fail closed: an unclassified response must not reach the RAG pipeline.
-        logfire.warning("🛡️ Guardrails returned an unclassified intent; blocking request.")
-        return True, OFF_TOPIC_RESPONSE
+    if _rails is not None:
+        with logfire.span("🛡️ Guardrails Check"):
+            try:
+                result = _rails.generate(messages=[{"role": "user", "content": message}])
+            except Exception:
+                logfire.exception("🛡️ Guardrails evaluation failed — blocking request.")
+                return True, OFF_TOPIC_RESPONSE
+
+            content = result.get("content", "") if isinstance(result, dict) else str(result)
+            content = (content or "").strip()
+            if TECHNICAL_QUERY_ALLOWED in content:
+                logfire.info("✅ Technical query accepted by guardrails.")
+                return False, None
+
+            fired = any(indicator.lower() in content.lower() for indicator in RAIL_INDICATORS)
+            if fired:
+                logfire.info(f"🛡️ Guardrails fired | query='{message[:80]}'")
+                return True, next(
+                    (
+                        known_response
+                        for known_response in KNOWN_RAIL_RESPONSES
+                        if known_response.lower() in content.lower()
+                    ),
+                    OFF_TOPIC_RESPONSE,
+                )
+
+    logfire.warning("🛡️ Unclassified or off-topic request; blocking to the technical refusal.")
+    return True, OFF_TOPIC_RESPONSE
