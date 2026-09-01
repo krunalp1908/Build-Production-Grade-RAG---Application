@@ -1,11 +1,13 @@
+import logfire
+
+from langchain_groq import ChatGroq
+
 from app.agents.state import AgentState
 from app.config import settings
-from langchain_groq import ChatGroq
-import logfire
 
 
 # ============================================================
-# Planner LLM
+# PLANNER LLM
 # ============================================================
 
 llm = ChatGroq(
@@ -15,85 +17,215 @@ llm = ChatGroq(
 )
 
 
-def planner_node(state: AgentState):
+# ============================================================
+# MESSAGE HELPERS
+# ============================================================
+
+def _get_content(message) -> str:
     """
-    Planner converts an allowed user request into a focused
-    retrieval query.
-
-    Guardrails are responsible for deciding whether the request
-    belongs to the RAG domain. The planner only operates after
-    the request has passed that guardrail.
+    Works with both:
+        dict messages
+    and:
+        LangChain HumanMessage / AIMessage
     """
 
-    messages = state.get("messages", [])
+    if isinstance(
+        message,
+        dict,
+    ):
 
-    # --------------------------------------------------------
-    # Extract previous conversation
-    # --------------------------------------------------------
-
-    history_messages = messages[:-1]
-
-    history = ""
-
-    for msg in history_messages:
-
-        # Support both dictionary-style messages and
-        # LangChain-style message objects.
-        if isinstance(msg, dict):
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
-        else:
-            role = getattr(msg, "type", "unknown")
-            content = getattr(msg, "content", "")
-
-        if role in ("user", "human"):
-            speaker = "User"
-        elif role in ("assistant", "ai"):
-            speaker = "Assistant"
-        else:
-            speaker = role
-
-        history += f"{speaker}: {content}\n"
-
-
-    # --------------------------------------------------------
-    # Latest user message
-    # --------------------------------------------------------
-
-    if messages:
-
-        latest_message = messages[-1]
-
-        if isinstance(latest_message, dict):
-            user_message = latest_message.get(
+        return str(
+            message.get(
                 "content",
-                ""
+                "",
             )
-        else:
-            user_message = getattr(
-                latest_message,
-                "content",
-                ""
-            )
+        )
+
+    return str(
+        getattr(
+            message,
+            "content",
+            "",
+        )
+    )
+
+
+def _get_role(message) -> str:
+
+    if isinstance(
+        message,
+        dict,
+    ):
+
+        role = message.get(
+            "role",
+            "unknown",
+        )
 
     else:
-        user_message = ""
+
+        role = getattr(
+            message,
+            "type",
+            "unknown",
+        )
+
+    if role in (
+        "human",
+        "user",
+    ):
+
+        return "User"
+
+    if role in (
+        "ai",
+        "assistant",
+    ):
+
+        return "Assistant"
+
+    return str(role)
 
 
-    # --------------------------------------------------------
-    # Planner prompt
-    # --------------------------------------------------------
+def _build_history(
+    messages,
+) -> str:
 
-    prompt = f"""
-You are the retrieval planner for an enterprise RAG chatbot.
+    history = []
 
-The request has already passed the application's
-RAG guardrail.
+    for message in messages[:-1]:
 
-Your ONLY job is to create a concise search query that
-can be sent to the retrieval system.
+        role = _get_role(
+            message
+        )
 
-The knowledge base covers:
+        content = _get_content(
+            message
+        )
+
+        history.append(
+            f"{role}: {content}"
+        )
+
+    return "\n".join(
+        history
+    )
+
+
+# ============================================================
+# PLANNER
+# ============================================================
+
+def planner_node(
+    state: AgentState,
+):
+
+    messages = state.get(
+        "messages",
+        [],
+    )
+
+    if not messages:
+
+        return {
+            "current_query": "OUT_OF_SCOPE",
+            "intent": "OUT_OF_SCOPE",
+            "status": "No message available.",
+            "plan": [
+                "Guardrail: Blocked",
+                "Retrieval: Skipped",
+                "LLM synthesis: Skipped",
+            ],
+        }
+
+    # ========================================================
+    # Latest user message
+    # ========================================================
+
+    latest_message = messages[-1]
+
+    user_message = _get_content(
+        latest_message
+    )
+
+    # ========================================================
+    # Conversation history
+    # ========================================================
+
+    history = _build_history(
+        messages
+    )
+
+    # ========================================================
+    # Intent supplied by application guardrail
+    # ========================================================
+
+    guard_intent = state.get(
+        "intent",
+        "RAG",
+    )
+
+    # ========================================================
+    # MEMORY
+    # ========================================================
+
+    if guard_intent == "MEMORY":
+
+        logfire.info(
+            "🧠 Planner: memory request"
+        )
+
+        return {
+            "current_query": "MEMORY",
+            "intent": "MEMORY",
+            "status": (
+                "Using conversation memory."
+            ),
+            "plan": [
+                "Guardrail: Memory request allowed",
+                "Retrieval: Skipped",
+            ],
+        }
+
+    # ========================================================
+    # RAG
+    # ========================================================
+
+    if guard_intent == "RAG":
+
+        rewrite_prompt = f"""
+You are a retrieval query planner for an enterprise
+documentation-grounded RAG assistant.
+
+The user's request has already passed the application's
+strict security and relevance guardrail.
+
+Your ONLY task is to rewrite the latest user request into
+a concise retrieval query.
+
+You MUST NOT answer the user.
+
+You MUST NOT provide an explanation.
+
+You MUST NOT use your own knowledge.
+
+Use the conversation history ONLY to resolve references such as:
+
+- it
+- this
+- that
+- they
+- them
+- the previous one
+- the previous configuration
+- explain that again
+- how does that work?
+
+============================================================
+KNOWLEDGE-BASE DOMAIN
+============================================================
+
+The knowledge base focuses on:
 
 - Kubernetes
 - Pods
@@ -107,7 +239,7 @@ The knowledge base covers:
 - Kubernetes networking
 - Kubernetes operators
 - Intel hardware
-- CPUs
+- Intel CPUs
 - FPGAs
 - NICs
 - SR-IOV
@@ -116,7 +248,7 @@ The knowledge base covers:
 - VLANs
 - BGP
 - Routing
-- Related infrastructure operations
+- Related enterprise infrastructure
 
 ============================================================
 CONVERSATION HISTORY
@@ -134,94 +266,88 @@ LATEST USER MESSAGE
 TASK
 ============================================================
 
-Create the best concise retrieval query for the latest
-user request.
+Return ONLY a concise search query.
 
-Use the conversation history only to resolve references
-such as:
+Example:
 
-- "it"
-- "that"
-- "this"
-- "the previous one"
-- "how does that work?"
-- "what happens next?"
+User:
+"What is a Kubernetes CronJob?"
 
-For example:
+Return:
 
-Conversation:
-User: What is a Kubernetes CronJob?
-Assistant: A CronJob creates Jobs on a schedule.
+Kubernetes CronJob
 
-Latest message:
-How often does it run?
+Example:
 
-Good search query:
-Kubernetes CronJob scheduling frequency
+Previous:
+"What is SR-IOV?"
 
-Another example:
+Current:
+"What are its benefits?"
 
-Conversation:
-User: What is SR-IOV?
-Assistant: [explanation]
+Return:
 
-Latest message:
-What are its benefits?
-
-Good search query:
 SR-IOV benefits
-
-Do NOT answer the question.
-
-Do NOT write explanations.
-
-Do NOT include greetings.
-
-Return ONLY the search query.
 """
 
+        with logfire.span(
+            "🧠 Retrieval Query Planner"
+        ):
 
-    # --------------------------------------------------------
-    # LLM call
-    # --------------------------------------------------------
+            try:
 
-    with logfire.span("🧠 Planner Decision"):
+                search_query = (
+                    llm
+                    .invoke(
+                        rewrite_prompt
+                    )
+                    .content
+                    .strip()
+                )
 
-        try:
+            except Exception as exc:
 
-            decision = (
-                llm
-                .invoke(prompt)
-                .content
-                .strip()
-            )
+                logfire.error(
+                    f"❌ Planner failed: {exc}"
+                )
 
-            logfire.info(
-                f"🔎 Retrieval query generated: {decision}"
-            )
+                # Safe fallback for the demo project.
+                search_query = user_message
 
-        except Exception as exc:
+        if not search_query:
 
-            logfire.error(
-                f"❌ Planner failed: {exc}"
-            )
+            search_query = user_message
 
-            # Simple fallback for a testing/demo project.
-            decision = user_message
+        logfire.info(
+            f"🔎 Retrieval query: {search_query}"
+        )
 
+        return {
+            "current_query": search_query,
+            "intent": "RAG",
+            "status": (
+                "Technical research needed. "
+                f"Searching for: {search_query}"
+            ),
+            "plan": [
+                "Guardrail: RAG allowed",
+                f"Search Term: {search_query}",
+            ],
+        }
 
-    # --------------------------------------------------------
-    # Return planner state
-    # --------------------------------------------------------
+    # ========================================================
+    # FAIL CLOSED
+    # ========================================================
 
     return {
-        "current_query": decision,
+        "current_query": "OUT_OF_SCOPE",
+        "intent": "OUT_OF_SCOPE",
         "status": (
-            f"Technical research needed. "
-            f"Searching for: {decision}"
+            "Request did not pass the RAG guardrail."
         ),
         "plan": [
-            "Intent: RAG",
-            f"Search Term: {decision}",
+            "Guardrail: Request blocked",
+            "Retrieval: Skipped",
+            "LLM synthesis: Skipped",
         ],
     }

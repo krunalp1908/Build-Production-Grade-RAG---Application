@@ -1,85 +1,137 @@
 # ============================================================
-# CRITICAL:
-# logfire MUST be configured before ALL other imports
-# so that spans from all modules are captured from the start.
+# ENVIRONMENT
 # ============================================================
 
-import logfire
 import os
+import uuid
 
 from dotenv import load_dotenv
-
-import uuid
 
 
 load_dotenv()
 
+
+# ============================================================
+# LOGFIRE
+# ============================================================
+
+import logfire
+
+
 logfire.configure(
-    token=os.getenv("LOGFIRE_TOKEN")
+    token=os.getenv(
+        "LOGFIRE_TOKEN"
+    )
 )
 
 
 # ============================================================
-# Now safe to import application modules
+# FASTAPI
 # ============================================================
 
-from fastapi import FastAPI, Response
+from fastapi import (
+    FastAPI,
+    Response,
+)
+
 from pydantic import BaseModel
+
 from typing import Optional
 
-from app.agents.graph import rag_agent
-from app.guardrails import initialize_rails, guard
+
+# ============================================================
+# APPLICATION MODULES
+# ============================================================
+
+from app.agents.graph import (
+    rag_agent,
+)
+
+from app.guardrails import (
+    initialize_rails,
+    guard,
+)
 
 
 # ============================================================
-# FastAPI
+# APPLICATION
 # ============================================================
 
 app = FastAPI(
-    title="Enterprise Agentic RAG API"
+    title="Enterprise Agentic RAG API",
+    description=(
+        "Documentation-grounded Agentic RAG "
+        "Assistant with session memory and "
+        "strict guardrails."
+    ),
+    version="1.0.0",
 )
 
 
 # ============================================================
-# Startup
+# STARTUP
 # ============================================================
 
-@app.on_event("startup")
+@app.on_event(
+    "startup"
+)
 def startup_event():
+
     initialize_rails()
 
+    logfire.info(
+        "🚀 Enterprise Agentic RAG API started."
+    )
+
 
 # ============================================================
-# Request model
+# REQUEST MODEL
 # ============================================================
 
-class QueryRequest(BaseModel):
+class QueryRequest(
+    BaseModel
+):
+
     q: str
-    thread_id: Optional[str] = "default_user"
+
+    thread_id: Optional[str] = None
 
 
 # ============================================================
-# Health check
+# HOME
 # ============================================================
 
 @app.get("/")
 def home():
+
     return {
-        "message": "Enterprise LangGraph RAG API is live."
+        "message": (
+            "Enterprise LangGraph RAG API is live."
+        )
     }
 
 
 # ============================================================
-# Graph visualization
+# HEALTH
+# ============================================================
+
+@app.get("/health")
+def health():
+
+    return {
+        "status": "healthy"
+    }
+
+
+# ============================================================
+# GRAPH VISUALIZATION
 # ============================================================
 
 @app.get("/graph")
 def get_graph_image():
-    """
-    Returns the Mermaid image of the agent's workflow.
-    """
 
     try:
+
         png_bytes = (
             rag_agent
             .get_graph()
@@ -91,218 +143,390 @@ def get_graph_image():
             media_type="image/png",
         )
 
-    except Exception as e:
+    except Exception as exc:
+
+        logfire.error(
+            "❌ Could not generate graph image: "
+            f"{exc}"
+        )
+
         return {
-            "error": f"Could not generate graph image: {e}"
+            "error": (
+                f"Could not generate graph image: {exc}"
+            )
         }
 
 
 # ============================================================
-# Query endpoint
+# QUERY ENDPOINT
 # ============================================================
 
 @app.post("/query")
-def query(request: QueryRequest):
-    """
-    Execute the LangGraph RAG flow with session memory.
+def query(
+    request: QueryRequest,
+):
 
-    Guardrails are evaluated BEFORE the RAG graph.
+    # ========================================================
+    # CLEAN INPUT
+    # ========================================================
 
-    The guard receives the previous messages from the same
-    thread so that contextual RAG follow-ups can be recognized.
-    """
+    q = (
+        request.q or ""
+    ).strip()
 
-    q = (request.q or "").strip()
+
+    # ========================================================
+    # SESSION ID
+    # ========================================================
 
     thread_id = (
         request.thread_id
-        or "default_user"
+        or str(uuid.uuid4())
     )
 
-    # --------------------------------------------------------
-    # Configuration for LangGraph memory
-    # --------------------------------------------------------
+
+    logfire.info(
+        "💬 Incoming request | "
+        f"thread={thread_id}"
+    )
+
+
+    # ========================================================
+    # EMPTY REQUEST
+    # ========================================================
+
+    if not q:
+
+        return {
+            "question": q,
+
+            "answer": (
+                "Please enter a question."
+            ),
+
+            "thought_process": [
+                "Guardrail: Empty request blocked",
+                "Retrieval: Skipped",
+                "LLM synthesis: Skipped",
+            ],
+
+            "status": (
+                "No query provided."
+            ),
+
+            "sources": [],
+
+            "thread_id": thread_id,
+        }
+
+
+    # ========================================================
+    # LANGGRAPH CONFIG
+    # ========================================================
 
     config = {
         "configurable": {
-            "thread_id": thread_id
+            "thread_id": thread_id,
         }
     }
 
-    # --------------------------------------------------------
-    # Retrieve existing session state
-    # --------------------------------------------------------
+
+    # ========================================================
+    # READ EXISTING MEMORY
+    # ========================================================
+    #
+    # This is ONLY used to give the guardrail enough context
+    # to understand conversation-memory requests.
+    #
+    # We DO NOT manually inject these messages into the new
+    # graph state.
+    #
+    # LangGraph's checkpointer handles that.
+    #
+    # ========================================================
 
     try:
-        state_snapshot = rag_agent.get_state(config)
+
+        snapshot = (
+            rag_agent.get_state(
+                config
+            )
+        )
 
         existing_state = (
-            state_snapshot.values
-            if state_snapshot
+            snapshot.values
+            if snapshot
             else {}
         )
 
     except Exception as exc:
-        logfire.error(
-            f"❌ Could not retrieve graph state: {exc}"
+
+        logfire.warning(
+            "⚠️ Could not read existing session "
+            f"memory: {exc}"
         )
 
         existing_state = {}
 
 
-    # --------------------------------------------------------
-    # Existing conversation
-    # --------------------------------------------------------
+    # ========================================================
+    # PREVIOUS MESSAGES
+    # ========================================================
 
-    prior_messages = (
-        existing_state.get("messages", [])
-        if isinstance(existing_state, dict)
-        else []
-    )
+    prior_messages = []
+
+    if isinstance(
+        existing_state,
+        dict,
+    ):
+
+        prior_messages = (
+            existing_state.get(
+                "messages",
+                [],
+            )
+        )
 
 
     # ========================================================
-    # GATE 1 — STRICT SESSION-AWARE GUARDRAILS
+    # GUARDRAIL
     # ========================================================
 
     try:
 
-        rail_fired, rail_response = guard(
+        (
+            rail_fired,
+            rail_response,
+            classification,
+        ) = guard(
             message=q,
             prior_messages=prior_messages,
         )
 
     except Exception as exc:
 
+        # ----------------------------------------------------
         # FAIL CLOSED
+        # ----------------------------------------------------
+
         logfire.error(
-            f"❌ Guardrail execution failed: {exc}"
+            "❌ Guardrail execution failed: "
+            f"{exc}"
         )
 
         return {
             "question": q,
+
             "answer": (
-                "I’m sorry, but I couldn’t safely process "
-                "that request right now."
+                "I couldn't safely process "
+                "that request."
             ),
+
             "thought_process": [
-                "Intent: Guardrail execution failure",
+                "Guardrail: Failed closed",
                 "Retrieval: Skipped",
+                "LLM synthesis: Skipped",
             ],
-            "status": "Blocked by guardrails.",
+
+            "status": (
+                "Blocked by safety guardrail."
+            ),
+
             "sources": [],
+
+            "thread_id": thread_id,
         }
 
 
-    # --------------------------------------------------------
-    # Guardrail fired
-    # --------------------------------------------------------
+    # ========================================================
+    # GUARDRAIL-HANDLED REQUEST
+    # ========================================================
 
     if rail_fired:
 
         logfire.info(
-            f"🛡️ Request handled by guardrails | "
+            "🛡️ Request handled by guardrail | "
+            f"classification={classification} | "
             f"thread={thread_id}"
         )
 
         return {
             "question": q,
+
             "answer": rail_response,
+
             "thought_process": [
-                "Intent: Guardrails Fired",
+                (
+                    "Guardrail: "
+                    f"{classification}"
+                ),
                 "Retrieval: Skipped",
+                "LLM synthesis: Skipped",
             ],
-            "status": "Blocked by guardrails.",
+
+            "status": (
+                "Handled by guardrails."
+            ),
+
             "sources": [],
+
+            "thread_id": thread_id,
         }
 
 
     # ========================================================
-    # GATE 2 — LANGGRAPH RAG PIPELINE
+    # INITIAL GRAPH STATE
     # ========================================================
-
-    # Only allowed messages reach this point.
     #
     # IMPORTANT:
-    # Do not put blocked messages into the RAG conversation state.
-    # This prevents off-topic conversations from contaminating
-    # future contextual follow-ups.
+    #
+    # Only the NEW user message is supplied.
+    #
+    # Previous conversation is restored automatically by
+    # MemorySaver using thread_id.
+    #
+    # ========================================================
 
     initial_state = {
-        "messages": (
-            prior_messages
-            + [
-                {
-                    "role": "user",
-                    "content": q,
-                }
-            ]
+
+        "messages": [
+            {
+                "role": "user",
+                "content": q,
+            }
+        ],
+
+        "current_query": "",
+
+        "intent": classification,
+
+        "documents": [],
+
+        "plan": [
+            (
+                "Guardrail: "
+                f"{classification}"
+            )
+        ],
+
+        "status": (
+            "Initializing LangGraph..."
         ),
 
-        "current_query": q,
-
-        "documents": (
-            existing_state.get("documents", [])
-            if isinstance(existing_state, dict)
-            else []
-        ),
-
-        "plan": (
-            existing_state.get("plan", ["Start"])
-            if isinstance(existing_state, dict)
-            else ["Start"]
-        ),
-
-        "status": "Initializing Graph...",
+        "final_answer": "",
     }
 
 
-    # --------------------------------------------------------
-    # Execute RAG
-    # --------------------------------------------------------
+    # ========================================================
+    # EXECUTE LANGGRAPH
+    # ========================================================
 
     try:
 
-        final_output = rag_agent.invoke(
-            initial_state,
-            config=config,
+        with logfire.span(
+            "🧠 LangGraph Execution"
+        ):
+
+            final_output = (
+                rag_agent.invoke(
+                    initial_state,
+                    config=config,
+                )
+            )
+
+
+        # ====================================================
+        # RESPONSE
+        # ====================================================
+
+        answer = final_output.get(
+            "final_answer",
+            "",
+        )
+
+        plan = final_output.get(
+            "plan",
+            [],
+        )
+
+        status = final_output.get(
+            "status",
+            "Completed.",
+        )
+
+        sources = final_output.get(
+            "documents",
+            [],
         )
 
 
+        # ====================================================
+        # EMPTY RESPONSE SAFETY
+        # ====================================================
+
+        if not answer:
+
+            answer = (
+                "I couldn't generate a response "
+                "for that request."
+            )
+
+
+        logfire.info(
+            "✅ LangGraph execution completed | "
+            f"thread={thread_id}"
+        )
+
+
+        # ====================================================
+        # RETURN
+        # ====================================================
+
         return {
+
             "question": q,
-            "answer": final_output.get(
-                "final_answer"
-            ),
-            "thought_process": final_output.get(
-                "plan"
-            ),
-            "status": final_output.get(
-                "status"
-            ),
-            "sources": final_output.get(
-                "documents",
-                []
-            ),
+
+            "answer": answer,
+
+            "thought_process": plan,
+
+            "status": status,
+
+            "sources": sources,
+
+            "thread_id": thread_id,
         }
 
 
-    except Exception as e:
+    # ========================================================
+    # BACKEND ERROR
+    # ========================================================
+
+    except Exception as exc:
 
         logfire.error(
-            f"❌ Backend Execution Failed: {e}"
+            "❌ Backend execution failed: "
+            f"{exc}"
         )
 
         return {
+
             "question": q,
+
             "answer": (
-                "I apologize, but I encountered an "
-                "internal error while processing your request. "
-                "Please try again later."
+                "I apologize, but I encountered "
+                "an internal error while processing "
+                "your request. Please try again later."
             ),
+
             "thought_process": [
-                "Error encountered during execution."
+                "Execution error.",
+                "Retrieval: Skipped",
             ],
+
             "status": "error",
+
             "sources": [],
+
+            "thread_id": thread_id,
         }
