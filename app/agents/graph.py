@@ -1,51 +1,73 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
+
 from app.agents.state import AgentState
 from app.agents.nodes.planner import planner_node
 from app.agents.nodes.retriever import retrieve_node
 from app.agents.nodes.responder import generate_node
 
 
-# 1. Initialize the State Graph
+# ============================================================
+# Build Graph
+# ============================================================
+
 workflow = StateGraph(AgentState)
 
 
-# 2. Define the Nodes
-workflow.add_node("planner", planner_node)
-workflow.add_node("retriever", retrieve_node)
-workflow.add_node("responder", generate_node)
+# ------------------------------------------------------------
+# Nodes
+# ------------------------------------------------------------
 
-# 3. Define the Edges & Routing Logic
-def route_planner(state: AgentState):
-    """
-    Routes the workflow based on the planner's decision.
-    """
-    if state["current_query"] == "CONVERSATIONAL":
-        return "responder"
-    return "retriever"
-
-workflow.set_entry_point("planner")
-
-
-# Conditional Edge: Planner -> Router -> (Retriever OR Responder)
-workflow.add_conditional_edges(
+workflow.add_node(
     "planner",
-    route_planner,
-    {
-        "retriever": "retriever",
-        "responder": "responder"
-    }
+    planner_node,
+)
+
+workflow.add_node(
+    "retriever",
+    retrieve_node,
+)
+
+workflow.add_node(
+    "responder",
+    generate_node,
 )
 
 
-workflow.add_edge("retriever", "responder")
-workflow.add_edge("responder", END)
+# ------------------------------------------------------------
+# Flow
+#
+# Guardrails are handled BEFORE this graph.
+#
+# Every request reaching this graph is expected to be
+# a valid RAG request.
+# ------------------------------------------------------------
+
+workflow.set_entry_point("planner")
+
+workflow.add_edge(
+    "planner",
+    "retriever",
+)
+
+workflow.add_edge(
+    "retriever",
+    "responder",
+)
+
+workflow.add_edge(
+    "responder",
+    END,
+)
 
 
-# --- MEMORY UPGRADE ---
-# MemorySaver allows the agent to remember conversations based on 'thread_id'
+# ============================================================
+# Session Memory
+# ============================================================
+
 checkpointer = MemorySaver()
 
 
-# 4. Compile the Graph with Memory
-rag_agent = workflow.compile(checkpointer=checkpointer)
+rag_agent = workflow.compile(
+    checkpointer=checkpointer,
+)
