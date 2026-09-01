@@ -1,70 +1,87 @@
 import logfire
-from portkey_ai import Portkey, createHeaders, PORTKEY_GATEWAY_URL
+
 from langchain_openai import ChatOpenAI
+from portkey_ai import (
+    createHeaders,
+    PORTKEY_GATEWAY_URL,
+)
 
 from app.config import settings
 
 
-# Production gateway config:
-#   - Fallback: primary @rag/llama-3.3-70b-versatile → @brag/llama-3.1-8b-instant on failure
-#   - Cache: semantic mode (requires Portkey Enterprise — silently falls back to simple on free/starter)
-#   - Retry: 2 attempts on rate limit / server error before triggering the fallback target
+# ============================================================
+# Configuration validation
+# ============================================================
 
-# GATEWAY_CONFIG = {
-#     "strategy": {"mode": "fallback"},
-#     "cache": {"mode": "simple"},
-#     "retry": {
-#         "attempts": 2,
-#         "on_status_codes": [429, 503]
-#     },
-#     "targets": [
-#         {"override_params": {"model": f"@{settings.GROQ_SLUG}/llama-3.3-70b-versatile"}},
-#         {"override_params": {"model": f"@{settings.GROQ_SLUG_2}/llama-3.1-8b-instant"}},
-#     ]
-# }
+def _validate_gateway_settings() -> None:
 
-portkey_client = Portkey(
-    api_key=settings.PORTKEY_API_KEY,
-    config=settings.GATEWAY_CONFIG
-)
+    missing = []
 
+    if not settings.PORTKEY_API_KEY:
+        missing.append("PORTKEY_API_KEY")
 
-def get_langchain_llm(feature: str = "rag") -> ChatOpenAI:
-    """
-    Returns a Portkey-backed ChatOpenAI — a drop-in for ChatGroq in LangChain nodes.
+    if not settings.PORTKEY_CONFIG_ID:
+        missing.append("PORTKEY_CONFIG_ID")
 
-    Why ChatOpenAI and not ChatGroq:
-      Portkey is a proxy. It exposes an OpenAI-compatible endpoint at PORTKEY_GATEWAY_URL.
-      ChatGroq is hardwired to Groq's API and does not support routing through a proxy.
-      ChatOpenAI supports base_url (points at Portkey) and default_headers (passes Portkey
-      auth + config). The @rag/model-name format is Portkey-specific — Groq's own client
-      does not understand it. You are still using Groq models; Portkey is just in the middle.
-    """
-    return ChatOpenAI(
-        api_key=settings.PORTKEY_API_KEY,
-        base_url=PORTKEY_GATEWAY_URL,
-        model=f"@{settings.GROQ_SLUG}/openai/gpt-oss-120b",
-        temperature=0,
-        default_headers=createHeaders(
-            api_key=settings.PORTKEY_API_KEY,
-            config=settings.GATEWAY_CONFIG,
-            metadata={
-                "feature": feature,
-                "_user": "rag-system",
-                "environment": "production"
-            }
+    if missing:
+        raise RuntimeError(
+            "Missing LLM Gateway configuration: "
+            + ", ".join(missing)
         )
+
+
+_validate_gateway_settings()
+
+
+# ============================================================
+# Application metadata
+# ============================================================
+
+GATEWAY_ENVIRONMENT = "resume-demo"
+
+APPLICATION_NAME = "enterprise-agentic-rag"
+
+
+# ============================================================
+# LangChain → Portkey
+# ============================================================
+
+def get_langchain_llm(
+    feature: str = "rag",
+) -> ChatOpenAI:
+
+    if not feature:
+        feature = "rag"
+
+
+    # --------------------------------------------------------
+    # Portkey headers
+    # --------------------------------------------------------
+
+    headers = createHeaders(
+        api_key=settings.PORTKEY_API_KEY,
+        config=settings.PORTKEY_CONFIG_ID,
     )
 
-def extract_cache_status(response) -> str:
-    """
-    Pull x-portkey-cache-status from the Portkey native client response headers.
-    Tries multiple attribute paths defensively — returns 'MISS' if not found.
-    """
-    for attr in ("_raw_response", "_response", "_http_response"):
-        raw = getattr(response, attr, None)
-        if raw is not None:
-            status = getattr(raw, "headers", {}).get("x-portkey-cache-status", "")
-            if status:
-                return status.upper()
-    return "MISS"
+
+    # --------------------------------------------------------
+    # LangChain client
+    # --------------------------------------------------------
+
+    llm = ChatOpenAI(
+    api_key=settings.PORTKEY_API_KEY,
+    base_url=PORTKEY_GATEWAY_URL,
+    model="gpt-4o-mini",
+    temperature=0,
+    default_headers=headers,
+    )
+
+
+    logfire.info(
+        "🚪 Portkey Gateway initialized | "
+        f"feature={feature} | "
+        f"config={settings.PORTKEY_CONFIG_ID}"
+    )
+
+
+    return llm

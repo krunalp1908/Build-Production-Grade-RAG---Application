@@ -21,9 +21,9 @@ class Settings:
 
     # --- LLM GATEWAY (PORTKEY) ---
     PORTKEY_API_KEY = os.getenv("PORTKEY_API_KEY")
-    GROQ_SLUG =  "rag"     # primary: @rag/openai/gpt-oss-120b
-    GROQ_SLUG_2 = "rag1"  # fallback: @rag1/openai/gpt-oss-20b
-    GATEWAY_CONFIG = os.getenv("GATEWAY_CONFIG")
+    PORTKEY_MODEL_SLUG =  "marathon-api"     # primary: @marathon-api/openai/gpt-oss-120b
+    PORTKEY_MODEL_SLUG_2 = "anthropic-fallback"  # fallback: @anthropic-fallback/openai/gpt-oss-20b
+    PORTKEY_CONFIG_ID = os.getenv("PORTKEY_CONFIG_ID")
 
     
     # --- OBSERVABILITY ---

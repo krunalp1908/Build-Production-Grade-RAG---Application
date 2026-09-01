@@ -1,87 +1,254 @@
 import logfire
-from app.agents.state import AgentState
-from app.gateway import portkey_client, extract_cache_status
 
+from app.agents.state import AgentState
+from app.gateway import get_langchain_llm
+
+
+# ============================================================
+# Responder LLM
+# ============================================================
+
+llm = get_langchain_llm(
+    feature="responder"
+)
+
+
+# ============================================================
+# Responder Node
+# ============================================================
 
 def generate_node(state: AgentState):
     """
-    Synthesizes a response using both Documentation Context AND Conversation History.
-    Uses the native Portkey client (not LangChain) so we can read the
-    x-portkey-cache-status response header and surface Cache: Hit in the UI.
+    Generates the final answer from retrieved enterprise
+    documentation.
+
+    Conversation history is intentionally NOT included in the
+    final RAG prompt.
+
+    The planner already uses conversation memory to resolve
+    contextual questions.
+
+    Keeping the final prompt deterministic improves the
+    effectiveness of Portkey's cache.
     """
+
     query = state["current_query"]
 
-    history_str = ""
-    for msg in state["messages"][:-1]:
-        role = "User" if msg["role"] == "user" else "Assistant"
-        history_str += f"{role}: {msg['content']}\n"
 
-    user_msg = state["messages"][-1]["content"] if state["messages"] else ""
+    # ========================================================
+    # Conversational response
+    # ========================================================
+    #
+    # This is retained for compatibility with the existing
+    # graph.
+    #
+    # Ideally your guardrail handles greetings/farewells
+    # before the graph.
+    # ========================================================
 
     if query == "CONVERSATIONAL":
-        logfire.info("Generating conversational response using memory.")
-        prompt = f"""
-        You are a friendly and helpful Enterprise AI Assistant.
-        Answer the user's latest message using the CONVERSATION HISTORY below.
 
-        CONVERSATION HISTORY:
-        {history_str}
+        prompt = """
+You are a friendly Enterprise AI Assistant.
 
-        LATEST MESSAGE:
-        "{user_msg}"
-        """
+Respond naturally to the user's conversational message.
+
+Be brief, warm, and human-like.
+
+Do not discuss internal implementation details.
+"""
+
+
     else:
-        logfire.info("Generating technical RAG response.")
+
+        # ====================================================
+        # Technical RAG response
+        # ====================================================
+
+        logfire.info(
+            "Generating technical RAG response."
+        )
+
+
+        # ====================================================
+        # Build deterministic context
+        # ====================================================
+
         max_context_chars = 25000
+
         full_context = ""
 
-        for doc in state["documents"]:
-            if len(full_context) + len(doc) < max_context_chars:
-                full_context += doc + "\n\n"
+
+        for doc in state.get(
+            "documents",
+            [],
+        ):
+
+            doc_text = str(
+                doc
+            )
+
+
+            if (
+                len(full_context)
+                + len(doc_text)
+                + 2
+                <= max_context_chars
+            ):
+
+                full_context += (
+                    doc_text
+                    + "\n\n"
+                )
+
             else:
-                logfire.warning("Context truncated to fit Groq TPM limits.")
+
+                logfire.warning(
+                    "Context truncated to fit "
+                    "LLM limits."
+                )
+
                 break
 
+
+        # ====================================================
+        # RAG prompt
+        # ====================================================
+        #
+        # IMPORTANT:
+        #
+        # No conversation history.
+        #
+        # The planner has already resolved it.
+        #
+        # This makes repeated requests much more cacheable.
+        # ====================================================
+
         prompt = f"""
-        You are a Senior Technical Architect.
-        Answer the question using the TECHNICAL CONTEXT provided.
+You are a friendly Senior Technical Architect working as an
+Enterprise RAG Assistant.
 
-        TECHNICAL CONTEXT:
-        {full_context}
+Answer the user's question using ONLY the technical
+documentation provided below.
 
-        CONVERSATION HISTORY:
-        {history_str}
+TECHNICAL CONTEXT:
+{full_context}
 
-        USER QUESTION:
-        "{user_msg}"
-        """
+USER QUESTION:
+{query}
 
-    with logfire.span("✍️ LLM Synthesis"):
+RULES:
+
+1. Use the technical context as the primary source of truth.
+
+2. Do not invent technical facts that are not supported by
+   the provided documentation.
+
+3. If the documentation does not contain enough information,
+   clearly say that the available documentation does not
+   contain enough information.
+
+4. Answer naturally, like a knowledgeable human technical
+   colleague.
+
+5. Do not mention guardrails, LangGraph, Portkey, prompts,
+   retrieval pipelines, or internal implementation details.
+
+6. Do not unnecessarily repeat the question.
+
+7. Use examples when they make the explanation clearer.
+
+8. Keep the answer focused on the user's question.
+"""
+
+
+    # ========================================================
+    # LLM generation
+    # ========================================================
+
+    with logfire.span(
+        "✍️ LLM Synthesis"
+    ):
+
         try:
-            response = portkey_client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1
-            )
-            content = response.choices[0].message.content
-            cache_status = extract_cache_status(response)
-            is_cache_hit = cache_status == "HIT"
 
-            if is_cache_hit:
-                logfire.info("⚡ Gateway Cache Hit — response served from Portkey cache.")
-                plan_update = state["plan"] + ["Cache: Hit ⚡"]
-                status = "Cache hit — instant response."
-            else:
-                logfire.info("✅ Response synthesised via LLM.")
-                plan_update = state["plan"]
-                status = "Response generated."
+            response = llm.invoke(
+                prompt
+            )
+
+
+            # =================================================
+            # Extract content
+            # =================================================
+
+            content = (
+                response.content
+                if hasattr(
+                    response,
+                    "content",
+                )
+                else str(response)
+            )
+
+
+            content = str(
+                content
+            ).strip()
+
+
+            # =================================================
+            # Update execution plan
+            # =================================================
+
+            previous_plan = state.get(
+                "plan",
+                []
+            )
+
+
+            plan_update = list(
+                previous_plan
+            )
+
+
+            plan_update.append(
+                "Response generated via Portkey Gateway"
+            )
+
+
+            logfire.info(
+                "✅ Response synthesised via "
+                "Portkey Gateway."
+            )
+
+
+            # =================================================
+            # Return
+            # =================================================
 
             return {
+
                 "final_answer": content,
-                "status": status,
+
+                "status": (
+                    "Response generated."
+                ),
+
                 "plan": plan_update,
-                "messages": [{"role": "assistant", "content": content}]
+
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": content,
+                    }
+                ],
             }
 
-        except Exception as e:
-            logfire.error(f"LLM Generation failed: {e}")
-            raise e
+
+        except Exception as exc:
+
+            logfire.error(
+                f"❌ LLM Generation failed: {exc}"
+            )
+
+            raise
