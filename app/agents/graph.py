@@ -39,21 +39,26 @@ workflow.add_node(
 
 # ============================================================
 # Graph flow
-#
-# Guardrails happen BEFORE this graph.
-#
-# Therefore every request entering this graph has already
-# passed the RAG relevance gate.
 # ============================================================
 
-workflow.set_entry_point(
-    "planner"
-)
+def route_after_planner(state: AgentState):
+    """Memory questions do not need retrieval; RAG questions do."""
+
+    if state.get("intent") == "MEMORY":
+        return "responder"
+
+    return "retriever"
 
 
-workflow.add_edge(
+workflow.set_entry_point("planner")
+
+workflow.add_conditional_edges(
     "planner",
-    "retriever",
+    route_after_planner,
+    {
+        "retriever": "retriever",
+        "responder": "responder",
+    },
 )
 
 

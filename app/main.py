@@ -3,10 +3,11 @@
 # ============================================================
 
 import os
+import uuid
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 
 # ============================================================
@@ -68,7 +69,24 @@ class QueryRequest(BaseModel):
 
     q: str
 
-    thread_id: Optional[str] = "default_user"
+    thread_id: Optional[str] = None
+
+
+def save_guardrail_turn(config, user_message: str, assistant_message: str) -> None:
+    """Persist direct guardrail replies in the LangGraph session."""
+
+    try:
+        rag_agent.update_state(
+            config,
+            {
+                "messages": [
+                    {"role": "user", "content": user_message},
+                    {"role": "assistant", "content": assistant_message},
+                ]
+            },
+        )
+    except Exception as exc:
+        logfire.warning(f"Could not save guardrail turn to memory: {exc}")
 
 
 # ============================================================
@@ -130,7 +148,7 @@ def query(
 
     thread_id = (
         request.thread_id
-        or "default_user"
+        or str(uuid.uuid4())
     )
 
 
@@ -250,7 +268,7 @@ def query(
 
     try:
 
-        rail_fired, rail_response = guard(
+        rail_fired, rail_response, classification = guard(
             message=q,
             prior_messages=prior_messages,
         )
@@ -292,6 +310,8 @@ def query(
 
     if rail_fired:
 
+        save_guardrail_turn(config, q, rail_response)
+
         logfire.info(
             "🛡️ Request handled by guardrail | "
             f"thread={thread_id}"
@@ -303,7 +323,7 @@ def query(
             "answer": rail_response,
 
             "thought_process": [
-                "Intent: Guardrails",
+                f"Guardrail: {classification}",
                 "Retrieval: Skipped",
             ],
 
@@ -342,11 +362,11 @@ def query(
 
         "current_query": q,
 
+        "intent": classification,
+
         "documents": [],
 
-        "plan": [
-            "Start"
-        ],
+        "plan": [f"Guardrail: {classification}"],
 
         "status": (
             "Initializing Graph..."

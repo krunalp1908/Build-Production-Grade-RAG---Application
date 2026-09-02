@@ -1,3 +1,5 @@
+import re
+
 import logfire
 
 from app.agents.state import AgentState
@@ -53,6 +55,17 @@ def planner_node(state: AgentState):
         []
     )
 
+    if state.get("intent") == "MEMORY":
+        return {
+            "current_query": "MEMORY",
+            "intent": "MEMORY",
+            "status": "Using conversation memory.",
+            "plan": [
+                "Guardrail: Memory request allowed",
+                "Retrieval: Skipped",
+            ],
+        }
+
     if not messages:
 
         return {
@@ -73,6 +86,27 @@ def planner_node(state: AgentState):
     user_message = _message_content(
         latest_message
     ).strip()
+
+    # Normal in-scope questions already have all the information needed for
+    # retrieval.  Keeping them unchanged gives Portkey's simple cache an
+    # identical request on repeated questions.  Only ambiguous follow-ups
+    # need an LLM rewrite using conversation history.
+    contextual_reference = re.search(
+        r"\b(it|this|that|they|them|previous|again)\b",
+        user_message,
+        re.IGNORECASE,
+    )
+
+    if not contextual_reference:
+        return {
+            "current_query": user_message,
+            "intent": "RAG",
+            "status": f"Searching for: {user_message}",
+            "plan": [
+                "Guardrail: RAG allowed",
+                f"Search Term: {user_message}",
+            ],
+        }
 
 
     # ========================================================
@@ -114,6 +148,8 @@ def planner_node(state: AgentState):
 
         return {
             "current_query": user_message,
+
+            "intent": "RAG",
 
             "status": (
                 "Repeated query detected."
@@ -279,6 +315,8 @@ a standalone technical search query.
         return {
             "current_query": "CONVERSATIONAL",
 
+            "intent": "CONVERSATIONAL",
+
             "status": (
                 "Handling conversational message."
             ),
@@ -296,6 +334,8 @@ a standalone technical search query.
 
     return {
         "current_query": decision,
+
+        "intent": "RAG",
 
         "status": (
             f"Technical research needed. "

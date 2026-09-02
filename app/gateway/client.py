@@ -68,19 +68,28 @@ def get_langchain_llm(
     # LangChain client
     # --------------------------------------------------------
 
+    model = settings.PORTKEY_MODEL_SLUG
+
+    # Accept either ``rag`` from .env or a complete Portkey model slug.
+    # The saved Portkey config remains authoritative and applies its fallback,
+    # retry, and simple-cache policies through x-portkey-config.
+    if not model.startswith("@"):
+        model = f"@{model}/openai/gpt-oss-120b"
+
     llm = ChatOpenAI(
-    api_key=settings.PORTKEY_API_KEY,
-    base_url=PORTKEY_GATEWAY_URL,
-    model="gpt-4o-mini",
-    temperature=0,
-    default_headers=headers,
+        api_key=settings.PORTKEY_API_KEY,
+        base_url=PORTKEY_GATEWAY_URL,
+        model=model,
+        temperature=0,
+        default_headers=headers,
     )
 
 
     logfire.info(
         "🚪 Portkey Gateway initialized | "
         f"feature={feature} | "
-        f"config={settings.PORTKEY_CONFIG_ID}"
+        f"config=...{settings.PORTKEY_CONFIG_ID[-6:]} | "
+        f"model={model}"
     )
 
 

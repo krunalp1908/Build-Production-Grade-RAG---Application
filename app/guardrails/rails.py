@@ -138,12 +138,32 @@ CAPABILITY_PATTERNS = [
 ]
 
 
+# Conversation-memory questions are not RAG retrieval requests.  They are
+# allowed through only when the current thread has earlier messages.
+MEMORY_PATTERNS = [
+    r"\bwhat\s+is\s+my\s+name\b",
+    r"\bwhat'?s\s+my\s+name\b",
+    r"\bwho\s+am\s+i\b",
+    r"\bwhat\s+did\s+i\s+(ask|say|tell\s+you)\b",
+    r"\bwhat\s+was\s+my\s+(last|previous)\s+question\b",
+    r"\bwhat\s+(is|was)\s+(my\s+|the\s+)?"
+    r"(first|last|previous)\s+question"
+    r"(\s+i\s+(ask|asked))?\b",
+    r"\bwhat\s+(is|was)\s+the\s+first\s+(thing|message)\b",
+    r"\bwhat\s+did\s+we\s+discuss\b",
+    r"\bwhat\s+were\s+we\s+talking\s+about\b",
+    r"\bdo\s+you\s+remember\b",
+    r"\bremember\s+(our\s+)?conversation\b",
+]
+
+
 # ============================================================
 # Prompt injection patterns
 # ============================================================
 
 PROMPT_OVERRIDE_PATTERNS = [
     r"\bignore\s+(all\s+)?previous\s+(instructions|prompts|rules)\b",
+    r"\bignore\s+(your|the|my)\s+(instructions|rules|guidelines|restrictions)\b",
     r"\bdisregard\s+(all\s+)?previous\s+(instructions|prompts|rules)\b",
     r"\bforget\s+(your\s+)?(instructions|system\s+prompt|rules)\b",
     r"\bignore\s+your\s+(system|developer)\s+(prompt|instructions)\b",
@@ -158,6 +178,10 @@ PROMPT_OVERRIDE_PATTERNS = [
     r"\bnew\s+system\s+prompt\b",
     r"\bnew\s+instructions\s+are\b",
     r"\bthat\s+is\s+an\s+order\b",
+    r"\bignore\s+(the\s+)?(rag|documentation|knowledge\s*base|database)\b",
+    r"\b(do\s+not|don't)\s+use\s+(the\s+)?(rag|documentation|knowledge\s*base)\b",
+    r"\b(answer|respond)\s+(from|using)\s+(your\s+)?(own|internal)\s+knowledge\b",
+    r"\b(reveal|show|print)\s+(your\s+)?(system|developer|hidden)\s+(prompt|instructions)\b",
 ]
 
 
@@ -176,6 +200,13 @@ def _is_prompt_override(message: str) -> bool:
             return True
 
     return False
+
+
+def _is_memory_question(message: str) -> bool:
+    return any(
+        re.search(pattern, message, re.IGNORECASE)
+        for pattern in MEMORY_PATTERNS
+    )
 
 
 # ============================================================
@@ -309,7 +340,7 @@ def initialize_rails() -> None:
 def guard(
     message: str,
     prior_messages: list[Any] | None = None,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, str]:
     """
     Strict session-aware RAG guard.
 
@@ -318,7 +349,7 @@ def guard(
         (True, response)
             Guard handled the request.
 
-        (False, None)
+        (False, None, "RAG" or "MEMORY")
             Request is allowed to enter LangGraph.
     """
 
@@ -331,6 +362,7 @@ def guard(
         return (
             True,
             OFF_TOPIC_RESPONSE,
+            "OUT_OF_SCOPE",
         )
 
 
@@ -353,6 +385,7 @@ def guard(
         return (
             True,
             JAILBREAK_RESPONSE,
+            "JAILBREAK",
         )
 
 
@@ -369,6 +402,7 @@ def guard(
             return (
                 True,
                 GREETING_RESPONSE,
+                "CONVERSATIONAL",
             )
 
 
@@ -385,6 +419,7 @@ def guard(
             return (
                 True,
                 FAREWELL_RESPONSE,
+                "CONVERSATIONAL",
             )
 
 
@@ -401,7 +436,25 @@ def guard(
             return (
                 True,
                 CAPABILITIES_RESPONSE,
+                "CONVERSATIONAL",
             )
+
+    # A memory request is answered by the graph from the existing session,
+    # never from general model knowledge or the RAG database.
+    if _is_memory_question(normalized_message):
+
+        if not prior_messages:
+            return (
+                True,
+                "I don't have any earlier messages in this session to refer to yet.",
+                "MEMORY",
+            )
+
+        return (
+            False,
+            None,
+            "MEMORY",
+        )
 
 
     # --------------------------------------------------------
@@ -418,6 +471,7 @@ def guard(
         return (
             True,
             OFF_TOPIC_RESPONSE,
+            "OUT_OF_SCOPE",
         )
 
 
@@ -620,6 +674,7 @@ BLOCK
             return (
                 True,
                 OFF_TOPIC_RESPONSE,
+                "OUT_OF_SCOPE",
             )
 
 
@@ -636,6 +691,7 @@ BLOCK
         return (
             False,
             None,
+            "RAG",
         )
 
 
@@ -649,4 +705,5 @@ BLOCK
     return (
         True,
         OFF_TOPIC_RESPONSE,
+        "OUT_OF_SCOPE",
     )

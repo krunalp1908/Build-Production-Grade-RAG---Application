@@ -1,13 +1,16 @@
-from typing import TypedDict, List, Annotated
-import operator
+from typing import Any, Annotated, List, TypedDict
+
+from langgraph.graph.message import add_messages
 
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     # Messages are accumulated across graph executions
     # for the same LangGraph thread_id.
-    messages: Annotated[List[dict], operator.add]
+    messages: Annotated[List[Any], add_messages]
 
     current_query: str
+
+    intent: str
 
     documents: List[str]
 

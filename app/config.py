@@ -1,8 +1,14 @@
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+
+# Always load this project's .env file.  ``override=True`` prevents an old
+# shell-level value (for example, a previous Portkey config id) from silently
+# routing requests to the wrong Portkey configuration.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 class Settings:
     # --- GEMINI EMBEDDINGS ---
@@ -11,18 +17,18 @@ class Settings:
     # --- VECTOR DB (QDRANT) ---
     QDRANT_URL = os.getenv("QDRANT_CLUSTER_ENDPOINT")
     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-    QDRANT_COLLECTION = "enterprise_rag"
+    QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "enterprise_rag")
 
     # --- REASONING ENGINE (GROQ) ---
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-    GROQ_MODEL = "openai/gpt-oss-120b"
+    GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
     GROQ_GUARD_MODEL = os.getenv("GROQ_GUARD_MODEL", "openai/gpt-oss-safeguard-20b")
     GROQ_FALLBACK_API_KEY = os.getenv("GROQ_FALLBACK_API_KEY")
 
     # --- LLM GATEWAY (PORTKEY) ---
     PORTKEY_API_KEY = os.getenv("PORTKEY_API_KEY")
-    PORTKEY_MODEL_SLUG =  "rag"     # primary: @mrag/openai/gpt-oss-120b
-    PORTKEY_FALLBACK_SLUG = "rag1"  # fallback: @rag1/openai/gpt-oss-20b
+    PORTKEY_MODEL_SLUG = os.getenv("PORTKEY_MODEL_SLUG", "rag").strip()
+    PORTKEY_FALLBACK_SLUG = os.getenv("PORTKEY_FALLBACK_SLUG", "rag1").strip()
     PORTKEY_CONFIG_ID = os.getenv("PORTKEY_CONFIG_ID")
 
     

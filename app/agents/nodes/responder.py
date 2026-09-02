@@ -33,7 +33,41 @@ def generate_node(state: AgentState):
     """
 
     query = state["current_query"]
+    intent = state.get("intent", "RAG")
 
+    if intent == "MEMORY":
+        def content(message):
+            return str(
+                message.get("content", "")
+                if isinstance(message, dict)
+                else getattr(message, "content", "")
+            )
+
+        def role(message):
+            value = (
+                message.get("role", "")
+                if isinstance(message, dict)
+                else getattr(message, "type", "")
+            )
+            return "User" if value in ("user", "human") else "Assistant"
+
+        history = "\n".join(
+            f"{role(message)}: {content(message)}"
+            for message in state.get("messages", [])[:-1]
+        )
+
+        latest_user_message = content(state.get("messages", [])[-1])
+
+        prompt = f"""
+You are a friendly Enterprise IT Assistant.
+Answer only from this session history. If the information is absent, say so.
+
+SESSION HISTORY:
+{history or "(No previous conversation.)"}
+
+LATEST USER MESSAGE:
+{latest_user_message}
+"""
 
     # ========================================================
     # Conversational response
@@ -46,7 +80,7 @@ def generate_node(state: AgentState):
     # before the graph.
     # ========================================================
 
-    if query == "CONVERSATIONAL":
+    elif query == "CONVERSATIONAL":
 
         prompt = """
 You are a friendly Enterprise AI Assistant.
