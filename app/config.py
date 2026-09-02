@@ -19,11 +19,6 @@ class Settings:
     GROQ_GUARD_MODEL = os.getenv("GROQ_GUARD_MODEL", "openai/gpt-oss-safeguard-20b")
     GROQ_FALLBACK_API_KEY = os.getenv("GROQ_FALLBACK_API_KEY")
 
-    # --- LLM GATEWAY (PORTKEY) ---
-    PORTKEY_API_KEY = os.getenv("PORTKEY_API_KEY")
-    GROQ_SLUG =  "rag"     # primary: @rag/openai/gpt-oss-120b
-    GROQ_SLUG_2 = "rag1"  # fallback: @rag1/openai/gpt-oss-20b
-
     
     # --- OBSERVABILITY ---
     LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "true")

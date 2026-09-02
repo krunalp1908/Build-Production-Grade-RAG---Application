@@ -98,6 +98,49 @@ class QueryRequest(
 
 
 # ============================================================
+# MEMORY HELPERS
+# ============================================================
+
+def save_guardrail_turn(
+    config,
+    user_message: str,
+    assistant_message: str,
+):
+    """Keep direct guardrail replies in the same session memory.
+
+    Guardrail-handled turns do not invoke the graph, so they must be
+    written to its checkpointer explicitly.
+    """
+
+    try:
+
+        rag_agent.update_state(
+            config,
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": user_message,
+                    },
+                    {
+                        "role": "assistant",
+                        "content": assistant_message,
+                    },
+                ]
+            },
+        )
+
+    except Exception as exc:
+
+        # A memory failure must not prevent the guardrail from
+        # returning its safe response.
+        logfire.warning(
+            "⚠️ Could not save guardrail turn to "
+            f"session memory: {exc}"
+        )
+
+
+# ============================================================
 # HOME
 # ============================================================
 
@@ -343,6 +386,12 @@ def query(
     # ========================================================
 
     if rail_fired:
+
+        save_guardrail_turn(
+            config,
+            q,
+            rail_response,
+        )
 
         logfire.info(
             "🛡️ Request handled by guardrail | "
