@@ -7,7 +7,7 @@ import os
 from dotenv import load_dotenv
 import uuid
 
-load_dotenv()
+load_dotenv(override=True)
 logfire.configure(token=os.getenv("LOGFIRE_TOKEN"))
 
 # Now safe to import app modules - logfire is already active
@@ -29,7 +29,21 @@ def startup_event():
 
 class QueryRequest(BaseModel):
     q: str
-    thread_id: Optional[str] = "kp"
+    thread_id: Optional[str] = None
+
+
+def save_guardrail_turn(config, user_message: str, assistant_message: str) -> None:
+    """Store direct guardrail responses in the same conversation thread."""
+    try:
+        rag_agent.update_state(
+            config,
+            {"messages": [
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": assistant_message},
+            ]},
+        )
+    except Exception as exc:
+        logfire.warning(f"Could not save guardrail turn to memory: {exc}")
 
 
 @app.get("/")
@@ -54,32 +68,46 @@ def query(request: QueryRequest):
     """
     Executes the LangGraph RAG flow with memory using a POST request.
     """
-    q = request.q
-    thread_id = str(uuid.uuid4())
+    q = (request.q or "").strip()
+    thread_id = request.thread_id or str(uuid.uuid4())
 
-    initial_state = {
-        "messages": [{"role": "user", "content": q}],
-        "current_query": q,
-        "documents": [],
-        "plan": ["Start"],
-        "status": "Initializing Graph..."
-    }
+    if not q:
+        return {"question": q, "answer": "Please enter a question.",
+                "thought_process": ["Guardrail: Empty request blocked"],
+                "status": "No query provided.", "sources": [], "thread_id": thread_id}
 
     # Configuration for Memory (Thread ID)
     config = {"configurable": {"thread_id": thread_id}}
 
     try:
+        snapshot = rag_agent.get_state(config)
+        prior_messages = snapshot.values.get("messages", []) if snapshot else []
+    except Exception as exc:
+        logfire.warning(f"Could not read session memory: {exc}")
+        prior_messages = []
+
+    try:
         # Gate 1: NeMo Guardrails — blocks off-topic, jailbreaks, and handles dialog
-        rail_fired, rail_response = guard(q)
+        rail_fired, rail_response, classification = guard(q, prior_messages)
         if rail_fired:
+            save_guardrail_turn(config, q, rail_response)
             logfire.info(f"🛡️ Request blocked by guardrails | thread={thread_id}")
             return {
                 "question": q,
                 "answer": rail_response,
-                "thought_process": ["Intent: Guardrails Fired", "Retrieval: Skipped"],
-                "status": "Blocked by guardrails.",
-                "sources": []
+                "thought_process": [f"Guardrail: {classification}", "Retrieval: Skipped"],
+                "status": "Handled by guardrails.",
+                "sources": [], "thread_id": thread_id
             }
+
+        initial_state = {
+            "messages": [{"role": "user", "content": q}],
+            "current_query": q,
+            "intent": classification,
+            "documents": [],
+            "plan": [f"Guardrail: {classification}"],
+            "status": "Initializing Graph..."
+        }
 
         # Gate 2: LangGraph RAG pipeline
         # Run the graph synchronously to preserve Logfire context variables
@@ -90,7 +118,8 @@ def query(request: QueryRequest):
             "answer": final_output.get("final_answer"),
             "thought_process": final_output.get("plan"),
             "status": final_output.get("status"),
-            "sources": final_output.get("documents", [])
+            "sources": final_output.get("documents", []),
+            "thread_id": thread_id
         }
     except Exception as e:
         logfire.error(f"❌ Backend Execution Failed: {e}")

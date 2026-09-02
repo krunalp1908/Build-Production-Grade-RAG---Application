@@ -15,7 +15,11 @@ API_URL = "http://localhost:8000/query"
 
 def _is_blocked(response_json: dict) -> bool:
     tp = response_json.get("thought_process") or []
-    return any("guardrails fired" in step.lower() for step in tp)
+    return any(
+        "guardrail: jailbreak" in step.lower()
+        or "guardrail: out_of_scope" in step.lower()
+        for step in tp
+    )
 
 
 def run_guardrails_eval(guardrails_samples: list, progress_callback=None) -> list:

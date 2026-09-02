@@ -11,14 +11,33 @@ def generate_node(state: AgentState):
     """
     query = state["current_query"]
 
+    def message_content(message):
+        return str(message.get("content", "") if isinstance(message, dict) else getattr(message, "content", ""))
+
+    def message_role(message):
+        value = message.get("role", "") if isinstance(message, dict) else getattr(message, "type", "")
+        return "User" if value in ("user", "human") else "Assistant"
+
     history_str = ""
     for msg in state["messages"][:-1]:
-        role = "User" if msg["role"] == "user" else "Assistant"
-        history_str += f"{role}: {msg['content']}\n"
+        history_str += f"{message_role(msg)}: {message_content(msg)}\n"
 
-    user_msg = state["messages"][-1]["content"] if state["messages"] else ""
+    user_msg = message_content(state["messages"][-1]) if state["messages"] else ""
 
-    if query == "CONVERSATIONAL":
+    if state.get("intent") == "MEMORY":
+        logfire.info("Generating response from session memory.")
+        prompt = f"""
+You are a friendly Enterprise IT Assistant.
+Answer only from the session history. If the requested information is not
+present, say that it is not available in this session.
+
+SESSION HISTORY:
+{history_str or "(No previous conversation.)"}
+
+LATEST USER MESSAGE:
+{user_msg}
+"""
+    elif query == "CONVERSATIONAL":
         logfire.info("Generating conversational response using memory.")
         prompt = f"""
         You are a friendly and helpful Enterprise AI Assistant.
@@ -42,25 +61,26 @@ def generate_node(state: AgentState):
                 logfire.warning("Context truncated to fit Groq TPM limits.")
                 break
 
+        # The planner resolves ambiguous references. Excluding mutable session
+        # history here keeps repeated RAG prompts identical for Portkey's
+        # simple cache.
         prompt = f"""
-        You are a Senior Technical Architect.
-        Answer the question using the TECHNICAL CONTEXT provided.
+You are a Senior Technical Architect and Enterprise RAG Assistant.
+Answer using only the technical context below. Do not invent facts. If the
+context is insufficient, say so clearly. Do not mention internal systems.
 
-        TECHNICAL CONTEXT:
-        {full_context}
+TECHNICAL CONTEXT:
+{full_context}
 
-        CONVERSATION HISTORY:
-        {history_str}
-
-        USER QUESTION:
-        "{user_msg}"
-        """
+USER QUESTION:
+{query}
+"""
 
     with logfire.span("✍️ LLM Synthesis"):
         try:
             response = portkey_client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1
+                temperature=0
             )
             content = response.choices[0].message.content
             cache_status = extract_cache_status(response)

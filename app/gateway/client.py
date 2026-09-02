@@ -5,27 +5,22 @@ from langchain_openai import ChatOpenAI
 from app.config import settings
 
 
-# Production gateway config:
-#   - Fallback: primary @rag/llama-3.3-70b-versatile → @brag/llama-3.1-8b-instant on failure
-#   - Cache: semantic mode (requires Portkey Enterprise — silently falls back to simple on free/starter)
-#   - Retry: 2 attempts on rate limit / server error before triggering the fallback target
+def _validate_gateway_settings() -> None:
+    missing = [
+        name for name, value in (
+            ("PORTKEY_API_KEY", settings.PORTKEY_API_KEY),
+            ("PORTKEY_CONFIG_ID", settings.PORTKEY_CONFIG_ID),
+        ) if not value
+    ]
+    if missing:
+        raise RuntimeError("Missing LLM Gateway configuration: " + ", ".join(missing))
 
-# GATEWAY_CONFIG = {
-#     "strategy": {"mode": "fallback"},
-#     "cache": {"mode": "simple"},
-#     "retry": {
-#         "attempts": 2,
-#         "on_status_codes": [429, 503]
-#     },
-#     "targets": [
-#         {"override_params": {"model": f"@{settings.GROQ_SLUG}/llama-3.3-70b-versatile"}},
-#         {"override_params": {"model": f"@{settings.GROQ_SLUG_2}/llama-3.1-8b-instant"}},
-#     ]
-# }
+
+_validate_gateway_settings()
 
 portkey_client = Portkey(
     api_key=settings.PORTKEY_API_KEY,
-    config=settings.GATEWAY_CONFIG
+    config=settings.PORTKEY_CONFIG_ID,
 )
 
 
@@ -40,14 +35,18 @@ def get_langchain_llm(feature: str = "rag") -> ChatOpenAI:
       auth + config). The @rag/model-name format is Portkey-specific — Groq's own client
       does not understand it. You are still using Groq models; Portkey is just in the middle.
     """
+    model = settings.PORTKEY_MODEL_SLUG
+    if not model.startswith("@"):
+        model = f"@{model}/openai/gpt-oss-120b"
+
     return ChatOpenAI(
         api_key=settings.PORTKEY_API_KEY,
         base_url=PORTKEY_GATEWAY_URL,
-        model=f"@{settings.GROQ_SLUG}/openai/gpt-oss-120b",
+        model=model,
         temperature=0,
         default_headers=createHeaders(
             api_key=settings.PORTKEY_API_KEY,
-            config=settings.GATEWAY_CONFIG,
+            config=settings.PORTKEY_CONFIG_ID,
             metadata={
                 "feature": feature,
                 "_user": "rag-system",

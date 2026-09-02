@@ -29,9 +29,9 @@ def detect_tool(thought_process: list) -> str:
     main.py sets:  'Intent: Guardrails Fired'                → guardrails
     """
     joined = " ".join(thought_process).lower()
-    if "guardrails fired" in joined:
+    if "guardrail: jailbreak" in joined or "guardrail: out_of_scope" in joined:
         return "guardrails"
-    if "intent: technical" in joined or "search term:" in joined or "context retrieved" in joined:
+    if "search term:" in joined or "context retrieved" in joined:
         return "retrieve_documents"
     if "conversational" in joined or "memory" in joined:
         return "direct_answer"

@@ -1,6 +1,7 @@
 from app.agents.state import AgentState
 from app.gateway import get_langchain_llm
 import logfire
+import re
 
 # Portkey-backed LLM: fallback + cache + retry — same .invoke() interface as ChatGroq
 llm = get_langchain_llm(feature="planner")
@@ -9,13 +10,36 @@ def planner_node(state: AgentState):
     """
     The Planner determines if a search is needed based on the ENTIRE conversation.
     """
+    if state.get("intent") == "MEMORY":
+        return {
+            "current_query": "MEMORY",
+            "intent": "MEMORY",
+            "status": "Using conversation memory.",
+            "plan": ["Guardrail: Memory request allowed", "Retrieval: Skipped"],
+        }
+
     # Get the conversation history (excluding the latest message)
     history = ""
     for msg in state["messages"][:-1]:
-        role = "User" if msg["role"] == "user" else "Assistant"
-        history += f"{role}: {msg['content']}\n"
+        if isinstance(msg, dict):
+            message_role = msg.get("role", "")
+            content = msg.get("content", "")
+        else:
+            message_role = getattr(msg, "type", "")
+            content = getattr(msg, "content", "")
+        role = "User" if message_role in ("user", "human") else "Assistant"
+        history += f"{role}: {content}\n"
 
-    user_message = state["messages"][-1]["content"] if state["messages"] else ""
+    latest = state["messages"][-1] if state["messages"] else {}
+    user_message = latest.get("content", "") if isinstance(latest, dict) else getattr(latest, "content", "")
+
+    if not re.search(r"\b(it|this|that|they|them|previous|again)\b", user_message, re.IGNORECASE):
+        return {
+            "current_query": user_message,
+            "intent": "RAG",
+            "status": f"Technical research needed. Searching for: {user_message}",
+            "plan": ["Guardrail: RAG allowed", f"Search Term: {user_message}"],
+        }
 
     prompt = f"""
     You are an intelligent Assistant Planner.
@@ -41,12 +65,14 @@ def planner_node(state: AgentState):
     if decision == "CONVERSATIONAL":
         return {
             "current_query": "CONVERSATIONAL",
+            "intent": "CONVERSATIONAL",
             "status": "Handling conversationally (using memory)...",
             "plan": ["Intent: Conversational/Memory", "Retrieval: Skipped"]
         }
 
     return {
         "current_query": decision,
+        "intent": "RAG",
         "status": f"Technical research needed. Searching for: {decision}",
         "plan": ["Intent: Technical", f"Search Term: {decision}"]
     }
