@@ -1,6 +1,6 @@
 # 🤖 Enterprise Agentic RAG: System Overview
 
-A production-grade, state-of-the-art RAG system built for speed, scalability, and deep observability. This platform leverages **LangGraph** to handle complex reasoning and a fully local, cloud-agnostic stack for document intelligence.
+A production-grade RAG system built for speed, scalability, and observability. This platform uses **LangGraph** for planner/retriever/responder orchestration, local document parsing and embeddings, Qdrant search, and Portkey-backed generation.
 
 ---
 
@@ -25,7 +25,7 @@ sequenceDiagram
     UI->>Agent: Request with thread_id
     Agent->>Agent: Planner decides intent
     alt Technical
-        Agent->>Data: Vector Search
+        Agent->>Data: Embed query + vector search
         Data-->>Agent: Raw Chunks
         Agent->>Agent: FlashRank Local Reranking
     else Conversational
@@ -38,7 +38,7 @@ sequenceDiagram
 
 ## 📂 Project Organization
 *   **`app/`**: The core Python package containing the Agent, Pipelines, and Services.
-*   **`ui/`**: A premium Streamlit interface designed for source transparency.
+*   **`ui/`**: A Streamlit chat interface that displays the answer, execution steps, and retrieved chunk text.
 *   **`DATA/`**: The ground-truth documentation used for ingestion.
 *   **`DOCS/`**: This documentation suite.
 *   **`commands.md`**: The master execution guide for developers.

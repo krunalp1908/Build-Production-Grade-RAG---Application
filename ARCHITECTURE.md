@@ -16,7 +16,7 @@ graph TB
     subgraph SAFETY ["2. API + Safety Gate"]
         direction LR
         API["⚡ FastAPI  /query"]
-        GR{"🛡️ NeMo Guardrails\nBlocks · Jailbreak · Off-topic · Injection"}
+        GR{"🛡️ Input Relevance Gate\nRegex + Groq classifier"}
     end
 
     subgraph AGENT ["3. Agent Engine — LangGraph"]
@@ -40,7 +40,7 @@ graph TB
         direction LR
         LOAD["Document Loaders\nPDF · HTML · DOCX · PPTX · TXT"]
         PROC[("📁 processed_data/\nLocal JSON Chunks")]
-        EMB["🔢 Gemini Embeddings\ngemini-embedding-2-preview · 3072-dim"]
+        EMB["🔢 Local Embeddings\nsentence-transformers/all-mpnet-base-v2"]
     end
 
     subgraph EVALS ["6. Evaluation Suite — RAGAS"]

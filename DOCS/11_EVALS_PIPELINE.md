@@ -21,7 +21,7 @@ You compare what the system actually says against the ground truth — that gap 
 
 ### Our Source Documents
 
-We parsed the following real enterprise documents from `data/true_data/`:
+We parsed the following real enterprise documents from `DATA/true_data/`:
 
 | File | Topic | Parser Used |
 |------|-------|-------------|
@@ -107,7 +107,7 @@ For each of the 15 golden questions, `evals/pipeline.py`:
 3. Parses `thought_process` to detect which tool was called:
    - `"Intent: Technical"` → `retrieve_documents`
    - `"Intent: Conversational/Memory"` → `direct_answer`
-   - `"Intent: Guardrails Fired"` → `guardrails`
+  - `"Guardrail: JAILBREAK"` or `"Guardrail: OUT_OF_SCOPE"` → `guardrails`
 4. Waits 10 seconds between calls (Groq RPM buffer on the main key)
 
 > **Why truncate to 300 chars?**  
@@ -115,7 +115,7 @@ For each of the 15 golden questions, `evals/pipeline.py`:
 
 ### Guardrails Evaluation
 
-`evals/guardrails_eval.py` sends each of the 6 test inputs to `/query` and checks if `thought_process` contains `"Intent: Guardrails Fired"`. Each result is classified as:
+`evals/guardrails_eval.py` sends each of the 6 test inputs to `/query` and checks if `thought_process` contains `"Guardrail: JAILBREAK"` or `"Guardrail: OUT_OF_SCOPE"`. Each result is classified as:
 
 | Label | Meaning |
 |-------|---------|
@@ -195,7 +195,7 @@ If both ran on the same key, a single eval run would rate-limit your live app mi
 
 ### Full Token Budget for This Eval Run (15 samples)
 
-#### Phase 1 — Response Generation (`GROQ_API_KEY`, llama-3.3-70b-versatile via Portkey)
+#### Phase 1 — Response Generation (`PORTKEY_API_KEY` and saved Portkey config)
 
 | Task | Calls | Tokens/call | Total tokens |
 |------|-------|-------------|--------------|

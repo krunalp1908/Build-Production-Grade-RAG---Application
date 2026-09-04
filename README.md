@@ -1,14 +1,14 @@
 # Enterprise Agentic RAG (Scalable Pipeline)
 
-A production-grade, enterprise-level RAG system built with **LangGraph**, **Portkey LLM Gateway**, and **Gemini Embeddings**. The system distinguishes between technical "True Data" and random "Noisy Data" using semantic re-ranking, history-aware planning, and NeMo Guardrails for input/output safety.
+A production-grade, enterprise-level RAG system built with **LangGraph**, **Portkey LLM Gateway**, local sentence-transformer embeddings, and Qdrant. The system distinguishes between technical "True Data" and random "Noisy Data" using semantic re-ranking, history-aware planning, and an input relevance gate.
 
 ## Key Features
 
 - **Agentic Intelligence**: LangGraph for cyclic reasoning, multi-step planning, and persistent conversation memory with MemorySaver.
-- **Safety & Guardrails**: NeMo Guardrails intelligently gate blocks off-topic, jailbreak, and injection inputs before any retrieval or processing.
+- **Safety & Guardrails**: Regex checks plus a Groq relevance classifier block off-topic and jailbreak inputs before retrieval. The current API does not run an output guardrail pass.
 - **LLM Gateway**: Portkey routes all LLM calls with automatic fallback between primary OSS and backup models, plus intelligent caching.
 - **Enterprise Search**: Qdrant Cloud vector database with FlashRank local semantic reranking for zero-latency relevance optimization.
-- **Gemini Embeddings**: Google `gemini-embedding-2-preview` (3072-dim dense vectors) via `langchain-google-genai` for SOTA retrieval.
+- **Local Embeddings**: `sentence-transformers/all-mpnet-base-v2` vectors, normalized before indexing and querying.
 - **Local Document Parsing**: PDF, HTML, TXT, DOCX, PPTX parsed entirely on-device via pypdf, BeautifulSoup, python-pptx — no external OCR.
 - **Observability & Tracing**: Full distributed tracing via **Pydantic Logfire** and **LangSmith** across every agent node and decision step.
 - **Comprehensive Evaluation**: RAGAS-powered eval suite (Faithfulness, Relevancy, Precision, Recall, Correctness) + Tool Correctness metrics with dedicated Streamlit demo.
@@ -20,7 +20,7 @@ A production-grade, enterprise-level RAG system built with **LangGraph**, **Port
 ```mermaid
 graph TD
     User((User Query)) --> UI["📱 Streamlit UI / FastAPI /query"]
-    UI --> Guard{{"🛡️ NeMo Guardrails<br/>Input Policy Check"}}
+    UI --> Guard{{"🛡️ Input Relevance Gate<br/>Regex + Groq classifier"}}
     Guard -->|Blocked| Block["❌ Reject + Explain"]
     Block --> UI
     Guard -->|Pass| Planner{{"🗺️ Planner Node<br/>Intent Classification"}}
@@ -30,13 +30,11 @@ graph TD
     QD --> Reranker["⚡ FlashRank<br/>Local Reranking"]
     Reranker --> Responder
     Responder --> GatewayNode["🔀 Portkey Gateway<br/>Route to Primary/Fallback"]
-    GatewayNode --> LLM1["🦙 Primary LLM<br/>openai/gpt-oss-120b"]
-    GatewayNode -->|Fallback| LLM2["🦙 Fallback LLM<br/>openai/gpt-oss-safeguard-20b"]
+    GatewayNode --> LLM1["🦙 Configured primary model"]
+    GatewayNode -->|Fallback| LLM2["🦙 Configured fallback model"]
     LLM1 --> Response["✅ Generated Response"]
     LLM2 --> Response
-    Response --> OutputGuard{{"🛡️ NeMo Guardrails<br/>Output Policy Check"}}
-    OutputGuard -->|Unsafe| Block
-    OutputGuard -->|Safe| UI
+    Response --> UI
     Responder -.->|History| Memory[("💾 MemorySaver<br/>Conversation State")]
     Memory -.->|Load Context| Planner
 
@@ -52,18 +50,17 @@ graph TD
     style LLM1 fill:#10b981
     style LLM2 fill:#10b981
     style Response fill:#22c55e
-    style OutputGuard fill:#dc2626
     style Memory fill:#8b5cf6
     style Block fill:#dc2626
 ```
 
 **Flow Summary:**
 1. User sends query → Streamlit UI or FastAPI `/query` endpoint
-2. **Input Guardrails** block off-topic, jailbreak, injection attacks
+2. **Input gate** blocks off-topic and jailbreak requests
 3. **Planner** classifies intent (conversational vs. technical retrieval)
-4. **Retriever** embeds query via Gemini, searches Qdrant, reranks with FlashRank
+4. **Retriever** embeds query locally, searches Qdrant, reranks with FlashRank
 5. **Responder** generates answer via LLM (Portkey routes to primary/fallback)
-6. **Output Guardrails** ensure response safety
+6. The API returns the generated response; output guardrails are not currently implemented
 7. **MemorySaver** persists conversation history for multi-turn context
 
 ---
@@ -85,7 +82,7 @@ graph TD
 │   │   └── client.py              # Portkey LLM gateway abstraction
 │   ├── guardrails/
 │   │   ├── __init__.py
-│   │   ├── colang_rules.py        # NeMo Guardrails policy definitions
+│   │   ├── colang_rules.py        # Retained Colang policy material
 │   │   └── rails.py               # Guardrails engine initialization
 │   ├── ingestion/
 │   │   ├── processor.py           # Main ingestion orchestrator
@@ -94,7 +91,7 @@ graph TD
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── health/                # Health check service
-│   │   └── retrieval/             # Gemini embeddings + Qdrant search + FlashRank reranking
+│   │   └── retrieval/             # Local embeddings + Qdrant search + FlashRank reranking
 │   ├── config.py                  # Centralized settings & environment variable loading
 │   └── main.py                    # FastAPI application entrypoint (/query, /health)
 │
@@ -126,7 +123,7 @@ graph TD
 │   ├── 05_ENVIRONMENT_VARIABLES.md      # All config options & defaults
 │   ├── 06_KNOWN_GOTCHAS.md        # Non-obvious bugs & design choices
 │   ├── 07_FLASHRANK_RERANKING.md  # Semantic reranker deep-dive
-│   ├── 08_GUARDRAILS.md           # NeMo Guardrails policy engine
+│   ├── 08_GUARDRAILS.md           # Active input relevance and jailbreak gate
 │   ├── 09_LLM_GATEWAY.md          # Portkey routing, fallback, cache
 │   ├── 10_EVALS.md                # RAGAS metrics theory
 │   └── 11_EVALS_PIPELINE.md       # Live eval pipeline & Streamlit demo
@@ -145,10 +142,10 @@ graph TD
 | Orchestration & State Management | LangChain + LangGraph with MemorySaver |
 | Reasoning Engines | OSS models via Groq (`openai/gpt-oss-120b` primary, `openai/gpt-oss-safeguard-20b` guardrail classifier) |
 | LLM Gateway & Routing | **Portkey** with automatic fallback, cache, and retry logic |
-| Guardrails & Safety | NeMo Guardrails (input/output policy enforcement) |
+| Guardrails & Safety | Python regex checks + Groq input relevance classifier |
 | Vector Database | Qdrant Cloud (`enterprise_rag` collection) |
 | Semantic Reranking | FlashRank (local cross-encoder, zero-latency) |
-| Dense Embeddings | Gemini `gemini-embedding-2-preview` (3072-dim vectors) |
+| Dense Embeddings | `sentence-transformers/all-mpnet-base-v2` (runtime-resolved dimension) |
 | Document Parsing | pypdf + pdfplumber (PDF), BeautifulSoup (HTML), python-docx (DOCX), python-pptx (PPTX), unstructured (fallback) |
 | Observability | Pydantic Logfire + LangSmith (distributed tracing) + Loguru (structured logging) |
 | Evaluation Metrics | RAGAS (Faithfulness, Relevancy, Precision, Recall) + custom Tool Correctness (Jaccard similarity) |
@@ -182,9 +179,9 @@ Create a `.env` file at the project root with the following keys:
 
 ```env
 # ============================================================================
-# EMBEDDING SERVICE (Gemini)
+# EMBEDDING SERVICE (local sentence-transformers)
 # ============================================================================
-GEMINI_API_KEY=""                          # Google Gemini API key for gemini-embedding-2-preview
+# No embedding API key is required. The model is downloaded by sentence-transformers.
 
 # ============================================================================
 # VECTOR DATABASE (Qdrant Cloud)
@@ -197,9 +194,9 @@ QDRANT_COLLECTION="enterprise_rag"         # Collection name for all indexed doc
 # REASONING ENGINES (Groq OSS Models)
 # ============================================================================
 GROQ_API_KEY=""                            # Primary Groq API key
-GROQ_MODEL="openai/gpt-oss-120b"           # Primary reasoning model (175B equivalent)
-GROQ_GUARD_MODEL="openai/gpt-oss-safeguard-20b"  # Guardrail classifier model
-GROQ_FALLBACK_API_KEY=""                   # Fallback Groq key for redundancy
+GROQ_MODEL="openai/gpt-oss-120b"           # Retained general Groq setting; planner/responder use Portkey
+GROQ_GUARD_MODEL="openai/gpt-oss-safeguard-20b"  # Direct input relevance classifier
+GROQ_FALLBACK_API_KEY=""                  # Portkey dashboard/provider configuration, if used
 
 # ============================================================================
 # LLM GATEWAY (Portkey)
@@ -207,7 +204,7 @@ GROQ_FALLBACK_API_KEY=""                   # Fallback Groq key for redundancy
 PORTKEY_API_KEY=""                         # Portkey gateway authentication
 PORTKEY_MODEL_SLUG="rag"                   # Primary routing config slug
 PORTKEY_FALLBACK_SLUG="rag1"               # Fallback routing config slug
-PORTKEY_CONFIG_ID=""                       # Optional: specific config ID override
+PORTKEY_CONFIG_ID=""                       # Required saved Portkey config ID
 
 # ============================================================================
 # OBSERVABILITY & TRACING
@@ -294,7 +291,7 @@ Opens eval dashboard at `http://localhost:8502` with:
 | 05 | [Environment Variables](docs/05_ENVIRONMENT_VARIABLES.md) | All env vars and configuration reference |
 | 06 | [Known Gotchas](docs/06_KNOWN_GOTCHAS.md) | Non-obvious bugs and architectural decisions |
 | 07 | [FlashRank Reranking](docs/07_FLASHRANK_RERANKING.md) | Local semantic reranker deep-dive |
-| 08 | [Guardrails](docs/08_GUARDRAILS.md) | NeMo Guardrails implementation |
+| 08 | [Guardrails](docs/08_GUARDRAILS.md) | Input relevance and jailbreak gate |
 | 09 | [LLM Gateway](docs/09_LLM_GATEWAY.md) | Portkey routing, fallback, and observability |
 | 10 | [Evals](docs/10_EVALS.md) | RAGAS metrics theory and token budget |
 | 11 | [Evals Pipeline](docs/11_EVALS_PIPELINE.md) | Live eval pipeline and Streamlit demo |
@@ -351,7 +348,7 @@ uvicorn app.main:app --reload
 | Issue | Solution |
 |-------|----------|
 | **Qdrant connection timeout** | Check `QDRANT_CLUSTER_ENDPOINT` and `QDRANT_API_KEY` in `.env` |
-| **Gemini embeddings 403 error** | Ensure `GEMINI_API_KEY` is valid and has quota available |
+| **Embedding model load failure** | Ensure the local sentence-transformers model can be downloaded and loaded |
 | **Groq rate limit hit** | Use separate `JUDGE_GROQ` key for evals; Portkey fallback will activate if primary throttled |
 | **LangSmith traces missing** | Ensure `LANGSMITH_TRACING=true` and `LANGSMITH_API_KEY` is set |
 | **Guardrails blocking all inputs** | Check `guardrails/colang_rules.py` — rules may be too strict |
@@ -384,7 +381,7 @@ uvicorn app.main:app --reload
 
 - **Multi-Modal RAG**: Add image-to-text via Claude 3.5 Vision for document diagrams
 - **Persistent Memory**: Implement long-term entity store for cross-session context
-- **Custom Fine-Tuning**: Fine-tune embeddings on domain-specific corpus via Gemini API
+- **Custom Fine-Tuning**: Evaluate a domain-specific embedding model before replacing the current local model
 - **Multi-Agent Workflows**: Add specialized sub-agents (e.g., code-generation, summarization)
 - **Streaming Responses**: WebSocket streaming for real-time answer generation
 - **Analytics Dashboard**: Monitor query patterns, cost, and latency over time

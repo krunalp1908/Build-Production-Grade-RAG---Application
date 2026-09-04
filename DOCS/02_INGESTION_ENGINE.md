@@ -14,7 +14,7 @@ graph LR
     BS4 --> Chunker
     Simple --> Chunker
     Office --> Chunker
-    Chunker --> Embedder[Gemini gemini-embedding-2-preview]
+    Chunker --> Embedder[Local sentence-transformers/all-mpnet-base-v2]
     Embedder --> VectorDB[(Qdrant Cloud)]
 ```
 
@@ -35,17 +35,19 @@ All document parsing runs entirely on-device — no external OCR service or clou
 *   **Logic**: The system uses a semantic-ish, paragraph-aware splitter. It attempts to keep paragraphs together to maintain context, ensuring that no chunk is cut off mid-sentence whenever possible. This prevents the LLM from getting "hallucinated" fragments.
 
 ### 3. Vectorization & Storage
-*   **Embedding Model**: `gemini-embedding-2-preview` (Google Gemini). A state-of-the-art embedding model specifically tuned for retrieval tasks.
-*   **Vector Dimensions**: `3072` dimensions.
+*   **Embedding Model**: `sentence-transformers/all-mpnet-base-v2`, loaded locally by `app/services/retrieval/embedding.py`.
+*   **Vector Dimensions**: Resolved at runtime from the loaded model; the collection is created with that dimension.
 *   **Vector Database**: **Qdrant**. We use a Cloud-hosted Qdrant instance for low-latency retrieval.
 *   **Distance Metric**: **Cosine Similarity** (`models.Distance.COSINE`) is used to measure how closely a user query matches our document chunks.
 
 ---
 
 ## 🌍 Universal Ingestion Command
-The engine is "Universal," meaning it automatically detects folder structures and maps them to metadata (e.g., "True" vs "Noisy" data).
+The engine is a manual batch job. It scans the supplied directory, detects subfolders, and maps folder names to metadata such as `true` and `noisy`. It does not watch `DATA/` for new files.
 
 ```powershell
 # Command to run the full ingestion
 python -m app.ingestion.processor DATA --wipe
 ```
+
+Run the command again after adding or changing a document. Without `--wipe`, points are upserted with new UUIDs, so re-ingesting an unchanged file can create duplicate chunks.

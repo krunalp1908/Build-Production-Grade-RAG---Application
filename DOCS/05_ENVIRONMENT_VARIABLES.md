@@ -12,7 +12,7 @@ lesson introduces new configuration.
 
 | Variable | Description | Example |
 | :--- | :--- | :--- |
-| `GROQ_API_KEY` | Primary Groq key — still called directly by the guardrails classifier | `gsk_...` |
+| `GROQ_API_KEY` | Groq key used by the input relevance classifier | `gsk_...` |
 | `GROQ_FALLBACK_API_KEY` | Second Groq key used by Portkey as the fallback target; can be the same as primary | `gsk_...` |
 
 ---
@@ -25,11 +25,11 @@ lesson introduces new configuration.
 
 ---
 
-## 🌐 Gemini Embeddings
+## 🧠 Local Embeddings
 
 | Variable | Description | Example |
 | :--- | :--- | :--- |
-| `GEMINI_API_KEY` | Google Gemini API key used to generate 3072-dim embeddings via `gemini-embedding-2-preview` | `AIza...` |
+| None | Embeddings use the locally loaded `sentence-transformers/all-mpnet-base-v2` model. Its dimension is discovered at runtime. | — |
 
 ---
 

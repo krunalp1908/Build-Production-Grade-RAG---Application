@@ -1,6 +1,6 @@
 # 🕵️ Tracing & Observability
 
-In an Agentic system, "Why did the AI say that?" is the most important question. We use a dual-tracing strategy to provide total transparency into the agent's thought process.
+In an agentic system, tracing shows which gate, graph node, retrieval step, and model call produced a response. This project uses Logfire for application spans and LangSmith's environment-based integration for LangChain/LangGraph runs.
 
 ---
 
@@ -15,9 +15,9 @@ Logfire provides distributed tracing for the entire infrastructure. It tracks:
 ### 2. LangSmith (LLM Orchestration)
 LangSmith is specialized for the "Agentic" part of the project. It records:
 *   **Graph State Transitions**: How the state changed between the Planner and the Retriever.
-*   **Prompt Versions**: The exact system instructions sent to Groq.
+*   **Prompts and runs**: LangChain/LangGraph calls, including the Portkey-backed planner wrapper.
 *   **Token Usage**: Monitoring the cost and efficiency of LLM calls.
-*   **Chain of Thought**: The reasoning steps the agent took before answering.
+*   **Execution state**: Planner routing and graph state transitions. The UI's `thought_process` is an application plan list, not hidden chain-of-thought.
 
 ---
 
@@ -28,7 +28,8 @@ graph TD
     Backend -->|Span| Logfire{Logfire}
     Backend -->|Trace| LangSmith{LangSmith}
     Backend -->|Query| Qdrant[(Qdrant)]
-    Backend -->|Model| Groq((Groq))
+    Backend -->|LLM calls| Portkey((Portkey))
+    Portkey --> Groq((Groq))
     
     subgraph Dashboard
         Logfire --> LView[Infrastructure View]
@@ -43,4 +44,4 @@ graph TD
 *   **LangSmith**: Visit your [LangSmith Project](https://smith.langchain.com/).
 
 > [!TIP]
-> All traces are linked via a common `trace_id`. If you find a bug in the UI, you can find the exact LLM call in LangSmith and the corresponding Logfire span using that ID.
+> Logfire is configured before application imports in `app/main.py`. This ordering is required because imported modules create spans during initialization. The UI and backend create related spans, but the API does not explicitly return a trace ID.

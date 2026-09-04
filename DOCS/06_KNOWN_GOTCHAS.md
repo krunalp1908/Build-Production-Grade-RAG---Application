@@ -10,17 +10,15 @@ gotcha applies to.
 ## 1. Embedding Dimension Is Resolved at Runtime, Not Hardcoded
 
 **The Issue:**
-Gemini's `gemini-embedding-2-preview` returns 3072-dim vectors, but if the
-Gemini API is unavailable, `app/services/retrieval/embedding.py` silently
-falls back to a local `SentenceTransformer` model (768-dim). If the Qdrant
-collection were created with a hardcoded dimension, ingestion would fail
-with a dimension mismatch the moment the fallback kicked in.
+`app/services/retrieval/embedding.py` uses the local
+`sentence-transformers/all-mpnet-base-v2` model. Its vector dimension is
+resolved from the loaded model rather than hardcoded, so the Qdrant
+collection matches the active model.
 
 **The Solution:**
 `app/ingestion/processor.py` calls `get_embedding_dim()` — which actually
-probes whichever embedding backend initialized — immediately before
-creating the Qdrant collection, so the collection's vector size always
-matches whatever is about to be written to it.
+probes the local embedding model immediately before creating the Qdrant
+collection, so the collection's vector size matches the vectors written to it.
 
 ---
 
@@ -97,21 +95,16 @@ degrades gracefully instead of taking down the whole pipeline.
 
 ---
 
-## 6. The Guardrails YAML's Declared Model Is Not What Actually Runs
+## 6. The Colang File Is Not the Active Request Gate
 
 **The Issue:**
-`app/guardrails/colang_rules.py`'s `YAML_CONTENT` declares
-`engine: openai, model: gpt-3.5-turbo` as the "main" model. If you read only
-the YAML, you'd assume guardrails calls OpenAI. It doesn't — no OpenAI key
-is configured anywhere in this project.
+`app/guardrails/colang_rules.py` contains historical Colang/YAML policy
+material, but the live `/query` path calls the Python `guard()` function.
 
 **The Solution:**
-`initialize_rails()` in `app/guardrails/rails.py` constructs an explicit
-`ChatGroq` instance and passes it directly as `LLMRails(config, llm=guard_llm)`.
-Passing an explicit `llm` overrides whatever the YAML config declares, so
-the actual classifier is Groq's `llama-3.1-8b-instant`. Keep this in mind
-when reading NeMo Guardrails config — the YAML's `models:` section is not
-authoritative once code passes its own `llm=`.
+`initialize_rails()` creates a direct `ChatGroq` classifier using
+`GROQ_GUARD_MODEL`. `guard()` applies deterministic regex/dialog checks and
+then asks that classifier for exactly `ALLOW` or `BLOCK`.
 
 ---
 
@@ -145,8 +138,8 @@ familiar interface. `app/agents/nodes/responder.py` needs to read the
 `x-portkey-cache-status` response header to know whether a request was
 served from cache — LangChain's `ChatOpenAI` wrapper doesn't expose that
 header, so `responder.py` uses the native Portkey client instead. Both
-routes share the same `GATEWAY_CONFIG` (fallback + cache + retry), so
-routing behavior is identical either way.
+routes use the saved `PORTKEY_CONFIG_ID`, so fallback, cache, and retry
+behavior are controlled centrally by Portkey.
 
 ---
 

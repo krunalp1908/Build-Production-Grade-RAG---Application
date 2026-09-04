@@ -130,7 +130,7 @@ sequenceDiagram
 
 **Why a separate LLM for judging?** Because you should not ask the same LLM that generated the answer to evaluate its own answer — it will almost always say it did well. Using a separate judge (even a smaller, cheaper model like `llama-3.1-8b-instant`) gives you a more objective score.
 
-In this project: `llama-3.3-70b-versatile` generates answers, `llama-3.1-8b-instant` judges them.
+In this project, answer generation is routed through Portkey using the saved gateway configuration. The RAGAS judge uses the separate `JUDGE_GROQ` credential and the model configured by the evaluation code.
 
 ---
 
@@ -1027,7 +1027,7 @@ This penalises **both** missing tools (recall failure) and extra tools (precisio
 ```
 ragas version      → 0.4.3
 judge LLM          → llm_factory("llama-3.1-8b-instant", provider="openai", client=AsyncOpenAI(...))
-embeddings         → HuggingFaceEmbeddings(model="sentence-transformers/all-MiniLM-L6-v2", use_api=False)
+embeddings         → SentenceTransformer(model="sentence-transformers/all-mpnet-base-v2")
 scoring call       → await metric.abatch_score(list_of_dicts)   ← NOT evaluate()
 score extraction   → float(result.value)
 cooldown           → 60s async sleep between experiments (Groq rate limit)

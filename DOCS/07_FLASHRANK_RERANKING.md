@@ -26,7 +26,7 @@ In modern RAG systems, there are two main ways to compare a user query with docu
 
 ```mermaid
 graph TD
-    Query[User Query] --> Embed[Gemini Embedding]
+    Query[User Query] --> Embed[Local MPNet Embedding]
     Embed --> Qdrant[(Qdrant Vector Search)]
     Qdrant -->|Top 15 Candidates| FR_Input[FlashRank Input]
     Query --> FR_Input
@@ -46,9 +46,9 @@ graph TD
 ## 🛠️ Implementation Details
 
 ### The Model
-We use the `ms-marco-MiniLM-L-6-v2` model.
+FlashRank loads its default local ranker through `Ranker`, using the ONNX cross-encoder packaged or downloaded by FlashRank.
 *   **Quantization**: The model is quantized into the **ONNX** format, allowing it to run lightning-fast on a standard CPU without needing a GPU.
-*   **Performance**: It typically reranks 15-20 documents in **< 100ms**.
+*   **Performance**: Latency depends on the local machine and first-run model download; the application does not enforce a fixed latency target.
 
 ### Lazy Initialization
 The model is roughly 30MB-50MB. To ensure the API starts up instantly, we use **Lazy Initialization**:
